@@ -1,0 +1,16 @@
+# vscode, claude and other tools
+.*/
+
+# build artifacts
+build/
+
+# build artifacts
+*.out
+*.o
+*.a
+*.so
+*.dll
+*.dylib
+
+# logs
+*.log

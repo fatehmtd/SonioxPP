@@ -1,0 +1,18 @@
+{
+    "name": "sonioxpp",
+    "version": "1.0.0",
+    "description": "C++17 library for the Soniox Speech-to-Text API (real-time WebSocket + async REST)",
+    "homepage": "https://github.com/fatehmtd/SonioxPP",
+    "license": "Apache-2.0",
+    "dependencies": [
+        {
+            "name": "boost-beast",
+            "version>=": "1.74.0"
+        },
+        {
+            "name": "boost-asio",
+            "version>=": "1.74.0"
+        },
+        "openssl"
+    ]
+}
