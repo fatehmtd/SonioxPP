@@ -26,15 +26,16 @@ supporting both **real-time WebSocket streaming** and **async REST transcription
 |---|---|---|
 | C++ compiler | C++17 | GCC 9+, Clang 10+, MSVC 2019+ |
 | CMake | 3.16+ | |
-| Boost | 1.74+ | beast, asio, system, thread — via vcpkg or system package manager |
+| libcurl | 7.62+ | HTTPS for async REST — via vcpkg or system package manager |
 | OpenSSL | 1.1+ | TLS for wss:// and https:// — via vcpkg or system package manager |
+| IXWebSocket | 11.4+ | WebSocket client for real-time streaming — fetched automatically via CMake FetchContent |
 | nlohmann/json | 3.12 | fetched automatically via CMake FetchContent |
 | spdlog | 1.15 | fetched automatically via CMake FetchContent |
 
 ### Option A — vcpkg (recommended)
 
-A `vcpkg.json` manifest is provided at `lib/sonioxpp/vcpkg.json`.
-Point CMake at the vcpkg toolchain and it will install Boost and OpenSSL automatically:
+A `vcpkg.json` manifest is provided at the repository root.
+Point CMake at the vcpkg toolchain and it will install libcurl and OpenSSL automatically:
 
 ```bash
 cmake -B build \
@@ -46,13 +47,13 @@ cmake --build build
 ### Option B — Homebrew (macOS)
 
 ```bash
-brew install boost openssl
+brew install curl openssl
 ```
 
 ### Option C — APT (Ubuntu/Debian)
 
 ```bash
-sudo apt install libboost-system-dev libboost-thread-dev libssl-dev
+sudo apt install libcurl4-openssl-dev libssl-dev
 ```
 
 ---
@@ -69,7 +70,7 @@ cmake -B build \
     -DSONIOX_BUILD_EXAMPLES=ON
 cmake --build build
 
-# Without vcpkg (Boost and OpenSSL must be installed via system package manager)
+# Without vcpkg (libcurl and OpenSSL must be installed via system package manager)
 cmake -B build -DSONIOX_BUILD_EXAMPLES=ON
 cmake --build build
 ```
@@ -123,7 +124,7 @@ export SONIOX_API_KEY=your_key_here
 ### Real-time streaming
 
 ```cpp
-#include <soniox/soniox.hpp>
+#include <sonioxpp/soniox.hpp>
 #include <fstream>
 #include <thread>
 
@@ -139,8 +140,8 @@ int main() {
         std::flush(std::cout);
     });
     client.setOnFinished([] { std::cout << "\nDone.\n"; });
-    client.setOnError([](int code, const std::string& msg) {
-        std::cerr << "Error " << code << ": " << msg << "\n";
+    client.setOnError([](const soniox::RealtimeError& err) {
+        std::cerr << "Error " << err.error_code << ": " << err.error_message << "\n";
     });
 
     client.connect(cfg);
@@ -162,7 +163,7 @@ int main() {
 ### Async transcription (single call)
 
 ```cpp
-#include <soniox/soniox.hpp>
+#include <sonioxpp/soniox.hpp>
 #include <iostream>
 
 int main() {
@@ -261,6 +262,16 @@ export SONIOX_API_KEY=your_key
 ./build/examples/realtime/soniox_realtime audio.wav --lang en,es --diarize
 ./build/examples/realtime/soniox_realtime audio.wav --chunk-ms 80 --debug
 ```
+
+### Real-time (microphone)
+
+```bash
+export SONIOX_API_KEY=your_key
+./build/examples/realtime_mic/soniox_realtime_mic
+./build/examples/realtime_mic/soniox_realtime_mic --lang en,es --diarize
+```
+
+Press **Enter** or **Ctrl+C** to stop recording. Requires a microphone to be connected.
 
 ### Async
 

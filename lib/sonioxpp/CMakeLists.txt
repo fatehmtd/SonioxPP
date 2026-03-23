@@ -9,8 +9,8 @@ include(FetchContent)
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
-# Boost, OpenSSL: declared in vcpkg.json — install with vcpkg, or provide
-# system packages (brew install boost openssl / apt install libboost-dev libssl-dev).
+# libcurl and OpenSSL: declared in vcpkg.json — install with vcpkg, or provide
+# system packages (brew install curl openssl / apt install libcurl4-openssl-dev libssl-dev).
 
 # spdlog
 FetchContent_Declare(
@@ -30,14 +30,24 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(nlohmann_json)
 
-# Boost — Boost.Beast and Boost.Asio are header-only; no compiled components needed.
-# Modern Boost (1.70+) ships as a single config package: request headers only.
-find_package(Boost 1.74 REQUIRED)
+# IXWebSocket — WebSocket client library (used by realtime_client)
+set(USE_TLS      ON  CACHE BOOL "" FORCE)
+set(USE_OPEN_SSL ON  CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    ixwebsocket
+    GIT_REPOSITORY https://github.com/machinezone/IXWebSocket.git
+    GIT_TAG        v11.4.5
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(ixwebsocket)
 
-# System threading library — required by Boost.Asio internally
+# libcurl — HTTPS client (used by async_client)
+find_package(CURL REQUIRED)
+
+# System threading library
 find_package(Threads REQUIRED)
 
-# OpenSSL (required for wss:// and https://)
+# OpenSSL (required for wss:// via IXWebSocket and https:// via libcurl)
 find_package(OpenSSL REQUIRED)
 
 # ---------------------------------------------------------------------------
@@ -57,18 +67,19 @@ target_include_directories(sonioxpp
 
 target_link_libraries(sonioxpp
     PUBLIC
-        Boost::boost        # header-only interface (Beast + Asio)
-        Threads::Threads    # system threading (pthreads / Win32 threads)
+        Threads::Threads
+    PRIVATE
+        CURL::libcurl
+        ixwebsocket
         OpenSSL::SSL
         OpenSSL::Crypto
-    PRIVATE
-        spdlog::spdlog              # used only in .cpp files, not public headers
-        nlohmann_json::nlohmann_json # used only in .cpp files, not public headers
+        spdlog::spdlog
+        nlohmann_json::nlohmann_json
 )
 
 # Windows socket libraries
 if(WIN32)
-    target_link_libraries(sonioxpp PUBLIC ws2_32 wsock32 crypt32)
+    target_link_libraries(sonioxpp PRIVATE ws2_32 wsock32 crypt32)
 endif()
 
 # ---------------------------------------------------------------------------
