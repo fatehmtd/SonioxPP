@@ -4,26 +4,6 @@ project(soniox_realtime_mic LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-include(FetchContent)
-
-# spdlog
-FetchContent_Declare(
-    spdlog
-    GIT_REPOSITORY https://github.com/gabime/spdlog.git
-    GIT_TAG        v1.15.0
-    GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(spdlog)
-
-# miniaudio — single-header audio I/O library
-FetchContent_Declare(
-    miniaudio
-    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
-    GIT_TAG        0.11.21
-    GIT_SHALLOW    TRUE
-)
-FetchContent_MakeAvailable(miniaudio)
-
 add_executable(soniox_realtime_mic main.cpp)
 
 target_include_directories(soniox_realtime_mic PRIVATE

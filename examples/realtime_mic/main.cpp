@@ -154,8 +154,8 @@ int main(int argc, char* argv[])
     // --- Build Soniox config ---
     soniox::RealtimeConfig config;
     config.api_key                        = api_key_env;
-    config.model                          = "stt-rt-v4";
-    config.audio_format                   = "pcm_s16le"; // raw 16-bit PCM from mic
+    config.model                          = soniox::stt::models::realtime_v4;
+    config.audio_format                   = soniox::stt::audio_formats::pcm_s16le; // raw 16-bit PCM from mic
     config.sample_rate                    = 16000;
     config.num_channels                   = 1;
     config.language_hints                 = splitLangs(lang_str);

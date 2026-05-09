@@ -80,7 +80,7 @@ int main(int argc, char* argv[])
 
     // --- Parse arguments ---
     std::string audio_path = argv[1];
-    std::string audio_fmt = "auto";
+    std::string audio_fmt = soniox::stt::audio_formats::auto_detect;
     int         chunk_ms = 120;
     std::string lang_str = "en";
     bool        diarize = false;
@@ -100,7 +100,7 @@ int main(int argc, char* argv[])
     // --- Build config ---
     soniox::RealtimeConfig config;
     config.api_key = api_key_env;
-    config.model = "stt-rt-v4";
+    config.model = soniox::stt::models::realtime_v4;
     config.audio_format = audio_fmt;
     config.language_hints = splitLangs(lang_str);
     config.enable_speaker_diarization = diarize;

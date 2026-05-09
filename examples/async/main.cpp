@@ -135,7 +135,7 @@ int main(int argc, char* argv[])
     // --- Build config ---
     soniox::AsyncConfig config;
     config.api_key                        = api_key_env;
-    config.model                          = "stt-async-v4";
+    config.model                          = soniox::stt::models::async_v4;
     config.language_hints                 = splitLangs(lang_str);
     config.enable_speaker_diarization     = diarize;
     config.enable_language_identification = lang_id;

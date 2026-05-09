@@ -1,347 +1,237 @@
-#include "async_client_impl.hpp"
+#include <sonioxpp/async_client.hpp>
+#include <sonioxpp/stt_client.hpp>
 
-#include <mutex>
+#include <nlohmann/json.hpp>
+#include <spdlog/spdlog.h>
+
+#include <chrono>
+#include <stdexcept>
+#include <thread>
 
 namespace soniox {
+namespace {
 
-// ---------------------------------------------------------------------------
-// One-time libcurl global init — called the first time AsyncClientImpl is
-// constructed. curl_global_init is not thread-safe; in practice this runs
-// before any user threads start. If your application is multi-threaded at
-// startup, call curl_global_init(CURL_GLOBAL_DEFAULT) yourself before
-// constructing any AsyncClient.
-// ---------------------------------------------------------------------------
+using json = nlohmann::json;
 
-AsyncClientImpl::AsyncClientImpl(const std::string& apiKey) : _apiKey(apiKey)
+json buildContextJson(const Context& context)
 {
-    static std::once_flag curlInitFlag;
-    std::call_once(curlInitFlag, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
-}
-
-// ---------------------------------------------------------------------------
-// curlWriteCallback — libcurl write function; appends received bytes to string
-// ---------------------------------------------------------------------------
-
-size_t AsyncClientImpl::curlWriteCallback(
-    char* ptr, size_t size, size_t nmemb, std::string* out)
-{
-    out->append(ptr, size * nmemb);
-    return size * nmemb;
-}
-
-// ---------------------------------------------------------------------------
-// httpRequest — generic HTTPS helper; one curl handle per call
-// ---------------------------------------------------------------------------
-
-std::string AsyncClientImpl::httpRequest(
-    const std::string& verb,
-    const std::string& target,
-    const std::string& contentType,
-    const std::string& requestBody)
-{
-    CURL* curl = curl_easy_init();
-    if (!curl) throw std::runtime_error("[sonioxpp] curl_easy_init failed");
-
-    std::string response;
-    std::string url = std::string("https://") + kHost + target;
-
-    curl_easy_setopt(curl, CURLOPT_URL,           url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA,     &response);
-
-    curl_slist* headers = nullptr;
-    std::string authHeader = "Authorization: Bearer " + _apiKey;
-    std::string uaHeader   = std::string("User-Agent: ") + USER_AGENT;
-    headers = curl_slist_append(headers, authHeader.c_str());
-    headers = curl_slist_append(headers, uaHeader.c_str());
-    if (!contentType.empty()) {
-        std::string ctHeader = "Content-Type: " + contentType;
-        headers = curl_slist_append(headers, ctHeader.c_str());
+    json ctx = json::object();
+    if (!context.general.empty()) {
+        ctx["general"] = context.general;
     }
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-
-    if (verb == "POST") {
-        curl_easy_setopt(curl, CURLOPT_POST,          1L);
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDS,    requestBody.c_str());
-        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(requestBody.size()));
-    } else if (verb == "DELETE") {
-        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    if (!context.text.empty()) {
+        ctx["text"] = context.text;
     }
-    // GET is the curl default
-
-    CURLcode res = curl_easy_perform(curl);
-    long httpCode = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
-
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-
-    if (res != CURLE_OK)
-        throw std::runtime_error(
-            std::string("[sonioxpp] curl: ") + curl_easy_strerror(res));
-    if (httpCode >= 400)
-        throw std::runtime_error(
-            "[sonioxpp] HTTP " + std::to_string(httpCode) +
-            " on " + target + ": " + response);
-
-    return response;
+    if (!context.terms.empty()) {
+        ctx["terms"] = context.terms;
+    }
+    if (!context.translation_terms.empty()) {
+        ctx["translation_terms"] = context.translation_terms;
+    }
+    return ctx;
 }
 
-// ---------------------------------------------------------------------------
-// uploadFile — multipart/form-data POST via curl_mime
-// ---------------------------------------------------------------------------
-
-std::string AsyncClientImpl::uploadFile(const std::string& filePath)
+json buildTranslationJson(const Translation& translation)
 {
-    auto sep = filePath.find_last_of("/\\");
-    std::string fileName = (sep != std::string::npos) ? filePath.substr(sep + 1) : filePath;
-    spdlog::info("[sonioxpp] Uploading {}", fileName);
+    json t = json::object();
+    if (!translation.type.empty()) {
+        t["type"] = translation.type;
+    }
+    if (!translation.language_a.empty()) {
+        t["language_a"] = translation.language_a;
+    }
+    if (!translation.language_b.empty()) {
+        t["language_b"] = translation.language_b;
+    }
+    return t;
+}
 
-    CURL* curl = curl_easy_init();
-    if (!curl) throw std::runtime_error("[sonioxpp] curl_easy_init failed");
+std::string parseRequiredId(const std::string& body, const char* operation)
+{
+    const json payload = json::parse(body);
+    if (!payload.contains("id")) {
+        throw std::runtime_error(std::string("[sonioxpp] ") + operation + ": unexpected response");
+    }
+    return payload["id"].get<std::string>();
+}
 
-    std::string response;
-    std::string url = std::string("https://") + kHost + kFilesPath;
+} // namespace
 
-    curl_mime*     mime = curl_mime_init(curl);
-    curl_mimepart* part = curl_mime_addpart(mime);
-    curl_mime_name(part, "file");
-    if (curl_mime_filedata(part, filePath.c_str()) != CURLE_OK) {
-        curl_mime_free(mime);
-        curl_easy_cleanup(curl);
-        throw std::runtime_error("[sonioxpp] Cannot open file: " + filePath);
+class AsyncClientImpl {
+public:
+    explicit AsyncClientImpl(const std::string& apiKey)
+        : rest_client_(apiKey)
+    {
     }
 
-    curl_easy_setopt(curl, CURLOPT_URL,           url.c_str());
-    curl_easy_setopt(curl, CURLOPT_MIMEPOST,      mime);
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCallback);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA,     &response);
-
-    curl_slist* headers = nullptr;
-    std::string authHeader = "Authorization: Bearer " + _apiKey;
-    std::string uaHeader   = std::string("User-Agent: ") + USER_AGENT;
-    headers = curl_slist_append(headers, authHeader.c_str());
-    headers = curl_slist_append(headers, uaHeader.c_str());
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-
-    CURLcode res = curl_easy_perform(curl);
-    long httpCode = 0;
-    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
-
-    curl_mime_free(mime);
-    curl_slist_free_all(headers);
-    curl_easy_cleanup(curl);
-
-    if (res != CURLE_OK)
-        throw std::runtime_error(
-            std::string("[sonioxpp] curl: ") + curl_easy_strerror(res));
-    if (httpCode >= 400)
-        throw std::runtime_error(
-            "[sonioxpp] HTTP " + std::to_string(httpCode) + ": " + response);
-
-    json jsonResponse = json::parse(response);
-    if (!jsonResponse.contains("id"))
-        throw std::runtime_error(
-            "[sonioxpp] uploadFile: unexpected response: " + response);
-
-    std::string fileId = jsonResponse["id"].get<std::string>();
-    spdlog::info("[sonioxpp] File uploaded, id={}", fileId);
-    return fileId;
-}
-
-// ---------------------------------------------------------------------------
-// deleteFile
-// ---------------------------------------------------------------------------
-
-void AsyncClientImpl::deleteFile(const std::string& fileId)
-{
-    httpRequest("DELETE", std::string(kFilesPath) + "/" + fileId, "", "");
-    spdlog::debug("[sonioxpp] Deleted file id={}", fileId);
-}
-
-// ---------------------------------------------------------------------------
-// createTranscription
-// ---------------------------------------------------------------------------
-
-std::string AsyncClientImpl::createTranscription(const AsyncConfig& config)
-{
-    if (config.audio_url.empty() && config.file_id.empty())
-        throw std::runtime_error(
-            "[sonioxpp] createTranscription: set audio_url or file_id in AsyncConfig");
-
-    json jsonContext;
-    jsonContext["general"]      = config.context.general;
-    jsonContext["text_context"] = config.context.text;
-    jsonContext["terms"]        = config.context.terms;
-
-    json jsonReq;
-    jsonReq["model"]                          = config.model;
-    jsonReq["language_hints"]                 = config.language_hints;
-    jsonReq["enable_language_identification"] = config.enable_language_identification;
-    jsonReq["enable_speaker_diarization"]     = config.enable_speaker_diarization;
-    jsonReq["context"]                        = jsonContext;
-
-    if (!config.audio_url.empty())
-        jsonReq["audio_url"] = config.audio_url;
-    else
-        jsonReq["file_id"] = config.file_id;
-
-    if (!config.translation.type.empty()) {
-        json jsonTranslation;
-        jsonTranslation["type"] = config.translation.type;
-        if (!config.translation.language_a.empty())
-            jsonTranslation["language_a"] = config.translation.language_a;
-        if (!config.translation.language_b.empty())
-            jsonTranslation["language_b"] = config.translation.language_b;
-        jsonReq["translation"] = jsonTranslation;
+    std::string uploadFile(const std::string& filePath)
+    {
+        return parseRequiredId(rest_client_.uploadFile(filePath), "uploadFile");
     }
 
-    std::string responseBody = httpRequest(
-        "POST", kTranscriptPath, "application/json", jsonReq.dump());
+    void deleteFile(const std::string& fileId)
+    {
+        rest_client_.deleteFile(fileId);
+    }
 
-    json jsonResponse = json::parse(responseBody);
-    if (!jsonResponse.contains("id"))
-        throw std::runtime_error(
-            "[sonioxpp] createTranscription: unexpected response: " + responseBody);
-
-    std::string transcriptionId = jsonResponse["id"].get<std::string>();
-    spdlog::info("[sonioxpp] Transcription created, id={}", transcriptionId);
-    return transcriptionId;
-}
-
-// ---------------------------------------------------------------------------
-// getTranscription
-// ---------------------------------------------------------------------------
-
-AsyncTranscription AsyncClientImpl::getTranscription(const std::string& transcriptionId)
-{
-    std::string responseBody = httpRequest(
-        "GET",
-        std::string(kTranscriptPath) + "/" + transcriptionId,
-        "", "");
-
-    json jsonResponse = json::parse(responseBody);
-
-    AsyncTranscription transcription;
-    transcription.id            = jsonResponse.value("id", transcriptionId);
-    transcription.error_message = jsonResponse.value("error_message", "");
-
-    const std::string statusStr = jsonResponse.value("status", "pending");
-    if      (statusStr == "completed") transcription.status = TranscriptionStatus::Completed;
-    else if (statusStr == "running")   transcription.status = TranscriptionStatus::Running;
-    else if (statusStr == "error")     transcription.status = TranscriptionStatus::Error;
-    else                               transcription.status = TranscriptionStatus::Pending;
-
-    return transcription;
-}
-
-// ---------------------------------------------------------------------------
-// getTranscript
-// ---------------------------------------------------------------------------
-
-std::vector<Token> AsyncClientImpl::getTranscript(const std::string& transcriptionId)
-{
-    std::string responseBody = httpRequest(
-        "GET",
-        std::string(kTranscriptPath) + "/" + transcriptionId + "/transcript",
-        "", "");
-
-    json jsonResponse = json::parse(responseBody);
-
-    std::vector<Token> tokens;
-    if (jsonResponse.contains("tokens")) {
-        for (const auto& jsonToken : jsonResponse["tokens"]) {
-            Token token;
-            token.text               = jsonToken.value("text", "");
-            token.is_final           = jsonToken.value("is_final", true);
-            token.speaker            = jsonToken.value("speaker", 0);
-            token.language           = jsonToken.value("language", "");
-            token.translation_status = jsonToken.value("translation_status", "");
-            token.start_ms           = jsonToken.value("start_ms", 0);
-            token.duration_ms        = jsonToken.value("duration_ms", 0);
-            tokens.push_back(std::move(token));
+    std::string createTranscription(const AsyncConfig& config)
+    {
+        if (config.audio_url.empty() && config.file_id.empty()) {
+            throw std::runtime_error("[sonioxpp] createTranscription: set audio_url or file_id in AsyncConfig");
         }
+
+        SttCreateTranscriptionRequest request;
+        request.model = config.model;
+        request.audio_url = config.audio_url;
+        request.file_id = config.file_id;
+        request.language_hints = config.language_hints;
+        request.enable_language_identification = config.enable_language_identification;
+        request.enable_speaker_diarization = config.enable_speaker_diarization;
+
+        const json context = buildContextJson(config.context);
+        if (!context.empty()) {
+            request.context_json = context.dump();
+        }
+
+        const json translation = buildTranslationJson(config.translation);
+        if (!translation.empty()) {
+            request.translation_json = translation.dump();
+        }
+
+        return parseRequiredId(rest_client_.createTranscription(request), "createTranscription");
     }
-    return tokens;
-}
 
-// ---------------------------------------------------------------------------
-// deleteTranscription
-// ---------------------------------------------------------------------------
+    AsyncTranscription getTranscription(const std::string& transcriptionId)
+    {
+        const json payload = json::parse(rest_client_.getTranscription(transcriptionId));
 
-void AsyncClientImpl::deleteTranscription(const std::string& transcriptionId)
-{
-    httpRequest("DELETE",
-                std::string(kTranscriptPath) + "/" + transcriptionId,
-                "", "");
-    spdlog::debug("[sonioxpp] Deleted transcription id={}", transcriptionId);
-}
+        AsyncTranscription result;
+        result.id = payload.value("id", transcriptionId);
+        result.error_message = payload.value("error_message", std::string());
 
-// ---------------------------------------------------------------------------
-// transcribeFile — convenience: upload → create → poll → fetch → cleanup
-// ---------------------------------------------------------------------------
+        const std::string status = payload.value("status", std::string("pending"));
+        if (status == "completed") {
+            result.status = TranscriptionStatus::Completed;
+        } else if (status == "running") {
+            result.status = TranscriptionStatus::Running;
+        } else if (status == "error") {
+            result.status = TranscriptionStatus::Error;
+        } else {
+            result.status = TranscriptionStatus::Pending;
+        }
 
-std::vector<Token> AsyncClientImpl::transcribeFile(
-    const std::string& filePath, AsyncConfig config, int pollIntervalMs)
-{
-    std::string fileId = uploadFile(filePath);
-    config.file_id = fileId;
-    config.audio_url.clear();
+        return result;
+    }
 
-    std::string transcriptionId = createTranscription(config);
+    std::vector<Token> getTranscript(const std::string& transcriptionId)
+    {
+        const json payload = json::parse(rest_client_.getTranscriptionTranscript(transcriptionId));
 
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
-        AsyncTranscription transcription = getTranscription(transcriptionId);
-        spdlog::debug("[sonioxpp] Poll id={} status={}",
-                      transcriptionId, static_cast<int>(transcription.status));
-
-        if (transcription.status == TranscriptionStatus::Completed) {
-            std::vector<Token> tokens = getTranscript(transcriptionId);
-            deleteTranscription(transcriptionId);
-            deleteFile(fileId);
+        std::vector<Token> tokens;
+        if (!payload.contains("tokens") || !payload["tokens"].is_array()) {
             return tokens;
         }
-        if (transcription.status == TranscriptionStatus::Error) {
-            deleteTranscription(transcriptionId);
-            deleteFile(fileId);
-            throw std::runtime_error(
-                "[sonioxpp] Transcription failed: " + transcription.error_message);
+
+        for (const auto& item : payload["tokens"]) {
+            Token token;
+            token.text = item.value("text", std::string());
+            token.is_final = item.value("is_final", true);
+            token.speaker = item.value("speaker", 0);
+            token.language = item.value("language", std::string());
+            token.translation_status = item.value("translation_status", std::string());
+            token.start_ms = item.value("start_ms", 0);
+
+            if (item.contains("duration_ms") && item["duration_ms"].is_number_integer()) {
+                token.duration_ms = item.value("duration_ms", 0);
+            } else {
+                const int end_ms = item.value("end_ms", token.start_ms);
+                token.duration_ms = (end_ms >= token.start_ms) ? (end_ms - token.start_ms) : 0;
+            }
+
+            tokens.push_back(std::move(token));
+        }
+
+        return tokens;
+    }
+
+    void deleteTranscription(const std::string& transcriptionId)
+    {
+        rest_client_.deleteTranscription(transcriptionId);
+    }
+
+    std::vector<Token> transcribeFile(const std::string& filePath, AsyncConfig config, int pollIntervalMs)
+    {
+        const std::string fileId = uploadFile(filePath);
+        config.file_id = fileId;
+        config.audio_url.clear();
+
+        const std::string transcriptionId = createTranscription(config);
+
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
+            const AsyncTranscription status = getTranscription(transcriptionId);
+
+            if (status.status == TranscriptionStatus::Completed) {
+                std::vector<Token> tokens = getTranscript(transcriptionId);
+                deleteTranscription(transcriptionId);
+                deleteFile(fileId);
+                return tokens;
+            }
+
+            if (status.status == TranscriptionStatus::Error) {
+                deleteTranscription(transcriptionId);
+                deleteFile(fileId);
+                throw std::runtime_error("[sonioxpp] Transcription failed: " + status.error_message);
+            }
+
+            spdlog::debug("[sonioxpp] Poll id={} status={}", transcriptionId, static_cast<int>(status.status));
         }
     }
-}
 
-// ---------------------------------------------------------------------------
-// AsyncClient — public interface (pimpl forwarding)
-// ---------------------------------------------------------------------------
+private:
+    SttRestClient rest_client_;
+};
 
 AsyncClient::AsyncClient(const std::string& apiKey)
-    : impl_(std::make_unique<AsyncClientImpl>(apiKey)) {}
+    : impl_(std::make_unique<AsyncClientImpl>(apiKey))
+{
+}
 
 AsyncClient::~AsyncClient() = default;
-AsyncClient::AsyncClient(AsyncClient&&)            noexcept = default;
+AsyncClient::AsyncClient(AsyncClient&&) noexcept = default;
 AsyncClient& AsyncClient::operator=(AsyncClient&&) noexcept = default;
 
-std::string AsyncClient::uploadFile(const std::string& filePath) {
+std::string AsyncClient::uploadFile(const std::string& filePath)
+{
     return impl_->uploadFile(filePath);
 }
-void AsyncClient::deleteFile(const std::string& fileId) {
+
+void AsyncClient::deleteFile(const std::string& fileId)
+{
     impl_->deleteFile(fileId);
 }
-std::string AsyncClient::createTranscription(const AsyncConfig& config) {
+
+std::string AsyncClient::createTranscription(const AsyncConfig& config)
+{
     return impl_->createTranscription(config);
 }
-AsyncTranscription AsyncClient::getTranscription(const std::string& transcriptionId) {
+
+AsyncTranscription AsyncClient::getTranscription(const std::string& transcriptionId)
+{
     return impl_->getTranscription(transcriptionId);
 }
-std::vector<Token> AsyncClient::getTranscript(const std::string& transcriptionId) {
+
+std::vector<Token> AsyncClient::getTranscript(const std::string& transcriptionId)
+{
     return impl_->getTranscript(transcriptionId);
 }
-void AsyncClient::deleteTranscription(const std::string& transcriptionId) {
+
+void AsyncClient::deleteTranscription(const std::string& transcriptionId)
+{
     impl_->deleteTranscription(transcriptionId);
 }
-std::vector<Token> AsyncClient::transcribeFile(
-    const std::string& filePath, AsyncConfig config, int pollIntervalMs)
+
+std::vector<Token> AsyncClient::transcribeFile(const std::string& filePath, AsyncConfig config, int pollIntervalMs)
 {
     return impl_->transcribeFile(filePath, std::move(config), pollIntervalMs);
 }

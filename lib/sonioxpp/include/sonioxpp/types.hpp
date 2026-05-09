@@ -1,7 +1,10 @@
 #pragma once
 
+#include <sonioxpp/api_constants.hpp>
+
 #include <cstdint>
 #include <functional>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -50,8 +53,8 @@ struct Translation {
 /// Configuration sent at the start of a real-time WebSocket session.
 struct RealtimeConfig {
     std::string api_key;                         ///< Soniox API key (required)
-    std::string model{"stt-rt-v4"};              ///< Transcription model
-    std::string audio_format{"auto"};            ///< "auto", "pcm_s16le", etc.
+    std::string model{stt::models::realtime_v4}; ///< Transcription model
+    std::string audio_format{stt::audio_formats::auto_detect}; ///< "auto", "pcm_s16le", etc.
     int         sample_rate{0};                  ///< PCM sample rate in Hz (required when audio_format is "pcm_s16le")
     int         num_channels{0};                 ///< Number of audio channels (required when audio_format is "pcm_s16le")
     std::vector<std::string> language_hints;     ///< e.g. {"en", "es"}
@@ -69,7 +72,7 @@ struct RealtimeConfig {
 /// Configuration for an async (REST) transcription job.
 struct AsyncConfig {
     std::string api_key;                         ///< Soniox API key (required)
-    std::string model{"stt-async-v4"};           ///< Transcription model
+    std::string model{stt::models::async_v4}; ///< Transcription model
     std::vector<std::string> language_hints;     ///< e.g. {"en"}
     bool enable_language_identification{false};  ///< Detect language per token
     bool enable_speaker_diarization{false};      ///< Assign speaker IDs
@@ -111,5 +114,57 @@ struct RealtimeError {
 
 /// Called when the server sends an error response or a network/protocol failure occurs.
 using OnErrorCallback = std::function<void(const RealtimeError&)>;
+
+/// Structured API error details parsed from Soniox REST responses.
+struct ApiValidationError {
+    std::string error_type;
+    std::string location;
+    std::string message;
+};
+
+/// Structured API error details parsed from Soniox REST responses.
+struct ApiErrorDetail {
+    int status_code{0};
+    std::string error_type;
+    std::string message;
+    std::string request_id;
+    std::vector<ApiValidationError> validation_errors;
+    std::string raw_body;
+};
+
+/// Exception thrown for Soniox REST API errors (HTTP >= 400) with parsed metadata.
+class SonioxApiException : public std::runtime_error {
+public:
+    SonioxApiException(
+        std::string operation,
+        ApiErrorDetail detail)
+        : std::runtime_error(makeWhat(operation, detail)),
+          operation_(std::move(operation)),
+          detail_(std::move(detail))
+    {
+    }
+
+    const std::string& operation() const noexcept { return operation_; }
+    const ApiErrorDetail& detail() const noexcept { return detail_; }
+
+private:
+    static std::string makeWhat(const std::string& operation, const ApiErrorDetail& detail)
+    {
+        std::string out = "[sonioxpp] " + operation + " failed with status " + std::to_string(detail.status_code);
+        if (!detail.error_type.empty()) {
+            out += ", type=" + detail.error_type;
+        }
+        if (!detail.message.empty()) {
+            out += ", message=" + detail.message;
+        }
+        if (!detail.request_id.empty()) {
+            out += ", request_id=" + detail.request_id;
+        }
+        return out;
+    }
+
+    std::string operation_;
+    ApiErrorDetail detail_;
+};
 
 } // namespace soniox

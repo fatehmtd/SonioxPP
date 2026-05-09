@@ -1,242 +1,240 @@
-#include "realtime_client_impl.hpp"
+#include <sonioxpp/realtime_client.hpp>
+#include <sonioxpp/stt_client.hpp>
+
+#include <nlohmann/json.hpp>
+
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <stdexcept>
 
 namespace soniox {
+namespace {
 
-// ---------------------------------------------------------------------------
-// buildConfigJson — serialise RealtimeConfig to the JSON the server expects
-// ---------------------------------------------------------------------------
+using json = nlohmann::json;
 
-json RealtimeClientImpl::buildConfigJson(const RealtimeConfig& config)
+json buildContextJson(const Context& context)
 {
-    json jsonContext = json::object();
-    if (!config.context.general.empty())
-        jsonContext["general"] = config.context.general;
-    if (!config.context.text.empty())
-        jsonContext["text"] = config.context.text;
-    if (!config.context.terms.empty())
-        jsonContext["terms"] = config.context.terms;
-    if (!config.context.translation_terms.empty())
-        jsonContext["translation_terms"] = config.context.translation_terms;
-
-    json jsonTranslation = json::object();
-    if (!config.translation.type.empty()) {
-        jsonTranslation["type"] = config.translation.type;
-        if (!config.translation.language_a.empty())
-            jsonTranslation["target_language"] = config.translation.language_a;
-        if (!config.translation.language_b.empty())
-            jsonTranslation["source_language"] = config.translation.language_b;
+    json ctx = json::object();
+    if (!context.general.empty()) {
+        ctx["general"] = context.general;
     }
-
-    json jsonCfg;
-    jsonCfg["api_key"]      = config.api_key;
-    jsonCfg["model"]        = config.model;
-    jsonCfg["audio_format"] = config.audio_format;
-    if (config.sample_rate  > 0) jsonCfg["sample_rate"]   = config.sample_rate;
-    if (config.num_channels > 0) jsonCfg["num_channels"]  = config.num_channels;
-    jsonCfg["language_hints"]                 = config.language_hints;
-    jsonCfg["enable_language_identification"] = config.enable_language_identification;
-    jsonCfg["enable_speaker_diarization"]     = config.enable_speaker_diarization;
-    jsonCfg["enable_endpoint_detection"]      = config.enable_endpoint_detection;
-    if (!jsonContext.empty())     jsonCfg["context"]     = jsonContext;
-    if (!jsonTranslation.empty()) jsonCfg["translation"] = jsonTranslation;
-
-    return jsonCfg;
+    if (!context.text.empty()) {
+        ctx["text"] = context.text;
+    }
+    if (!context.terms.empty()) {
+        ctx["terms"] = context.terms;
+    }
+    if (!context.translation_terms.empty()) {
+        ctx["translation_terms"] = context.translation_terms;
+    }
+    return ctx;
 }
 
-// ---------------------------------------------------------------------------
-// connect — set up WebSocket, register callbacks, start background thread,
-//           block until the Open event (connection established) or an error.
-// ---------------------------------------------------------------------------
-
-void RealtimeClientImpl::connect(const RealtimeConfig& config)
+json buildTranslationJson(const Translation& translation)
 {
-    ix::initNetSystem();
+    json t = json::object();
+    if (!translation.type.empty()) {
+        t["type"] = translation.type;
+    }
+    if (!translation.language_a.empty()) {
+        t["language_a"] = translation.language_a;
+    }
+    if (!translation.language_b.empty()) {
+        t["language_b"] = translation.language_b;
+    }
+    return t;
+}
 
-    std::string url = std::string("wss://") +
-                      endpoints::REALTIME_HOST +
-                      endpoints::REALTIME_PATH;
-    std::string configJson = buildConfigJson(config).dump();
-    spdlog::debug("[sonioxpp] Sending realtime config: {}", configJson);
+} // namespace
 
-    _ws.setUrl(url);
-
-    ix::SocketTLSOptions tlsOptions;
-    tlsOptions.caFile = "SYSTEM"; // use platform certificate store
-    _ws.setTLSOptions(tlsOptions);
-
-    _ws.setExtraHeaders({{"User-Agent", USER_AGENT}});
-
-    _ws.setOnMessageCallback([this, configJson](const ix::WebSocketMessagePtr& msg)
+class RealtimeClientImpl {
+public:
+    RealtimeClientImpl()
+        : realtime_client_()
     {
-        if (msg->type == ix::WebSocketMessageType::Open)
-        {
-            spdlog::debug("[sonioxpp] WebSocket opened, sending config");
-            _ws.send(configJson); // text frame with config JSON
-            {
-                std::lock_guard<std::mutex> lk(_connectMtx);
-                _connected = true;
+        realtime_client_.setOnMessage([this](const std::string& raw) { handleMessage(raw); });
+
+        realtime_client_.setOnError([this](const std::string& message) {
+            if (on_error_) {
+                on_error_(RealtimeError{0, message});
             }
-            _connectCv.notify_one();
+            finished_.store(true);
+            done_cv_.notify_all();
+        });
+
+        realtime_client_.setOnClosed([this] {
+            finished_.store(true);
+            done_cv_.notify_all();
+        });
+    }
+
+    void connect(const RealtimeConfig& config)
+    {
+        SttRealtimeConfig request;
+        request.api_key = config.api_key;
+        request.model = config.model;
+        request.audio_format = config.audio_format;
+        request.sample_rate = config.sample_rate;
+        request.num_channels = config.num_channels;
+        request.language_hints = config.language_hints;
+        request.enable_language_identification = config.enable_language_identification;
+        request.enable_speaker_diarization = config.enable_speaker_diarization;
+        request.enable_endpoint_detection = config.enable_endpoint_detection;
+
+        const json context = buildContextJson(config.context);
+        if (!context.empty()) {
+            request.context_json = context.dump();
         }
-        else if (msg->type == ix::WebSocketMessageType::Message)
-        {
-            handleMessage(msg->str);
+
+        const json translation = buildTranslationJson(config.translation);
+        if (!translation.empty()) {
+            request.translation_json = translation.dump();
         }
-        else if (msg->type == ix::WebSocketMessageType::Error)
-        {
-            spdlog::error("[sonioxpp] WebSocket error: {}", msg->errorInfo.reason);
-            bool notifyConnect = false;
-            {
-                std::lock_guard<std::mutex> lk(_connectMtx);
-                if (!_connected) {
-                    _connectFailed = true;
-                    _connectError  = msg->errorInfo.reason;
-                    notifyConnect  = true;
+
+        finished_.store(false);
+        realtime_client_.connect(request);
+    }
+
+    void sendAudio(const uint8_t* data, size_t size)
+    {
+        if (size == 0 || data == nullptr) {
+            return;
+        }
+
+        std::vector<std::uint8_t> bytes(data, data + size);
+        realtime_client_.sendAudio(bytes);
+    }
+
+    void sendEndOfAudio()
+    {
+        realtime_client_.sendEndOfAudio();
+    }
+
+    void run()
+    {
+        std::unique_lock<std::mutex> lock(done_mutex_);
+        done_cv_.wait(lock, [this] { return finished_.load(); });
+    }
+
+    void close()
+    {
+        realtime_client_.close();
+    }
+
+    OnTokensCallback on_tokens_;
+    OnFinishedCallback on_finished_;
+    OnErrorCallback on_error_;
+
+private:
+    void handleMessage(const std::string& rawMessage)
+    {
+        json payload;
+        try {
+            payload = json::parse(rawMessage);
+        } catch (const json::exception&) {
+            return;
+        }
+
+        const std::string error_message = payload.value("error_message", std::string());
+        if (!error_message.empty()) {
+            const int error_code = payload.value("error_code", 0);
+            if (on_error_) {
+                on_error_(RealtimeError{error_code, error_message});
+            }
+            return;
+        }
+
+        if (payload.contains("tokens") && payload["tokens"].is_array() && on_tokens_) {
+            std::vector<Token> tokens;
+            bool has_final = false;
+
+            for (const auto& item : payload["tokens"]) {
+                Token token;
+                token.text = item.value("text", std::string());
+                token.is_final = item.value("is_final", false);
+                token.speaker = item.value("speaker", 0);
+                token.language = item.value("language", std::string());
+                token.translation_status = item.value("translation_status", std::string());
+                if (token.is_final) {
+                    has_final = true;
                 }
+                tokens.push_back(std::move(token));
             }
-            if (notifyConnect)
-                _connectCv.notify_one();
-            else if (_onError)
-                _onError(RealtimeError{0, msg->errorInfo.reason});
-        }
-        else if (msg->type == ix::WebSocketMessageType::Close)
-        {
-            spdlog::info("[sonioxpp] WebSocket closed");
-            _finished.store(true);
-            _doneCv.notify_all();
-        }
-    });
 
-    _ws.start();
-
-    {
-        std::unique_lock<std::mutex> lk(_connectMtx);
-        _connectCv.wait(lk, [this] { return _connected || _connectFailed; });
-    }
-
-    if (_connectFailed) {
-        _ws.stop();
-        throw std::runtime_error(
-            "[sonioxpp] WebSocket connect failed: " + _connectError);
-    }
-
-    spdlog::info("[sonioxpp] Connected to {}{}",
-                 endpoints::REALTIME_HOST, endpoints::REALTIME_PATH);
-}
-
-// ---------------------------------------------------------------------------
-// sendAudio — thread-safe (IXWebSocket serialises sends internally)
-// ---------------------------------------------------------------------------
-
-void RealtimeClientImpl::sendAudio(const uint8_t* data, size_t size)
-{
-    _ws.sendBinary(std::string(reinterpret_cast<const char*>(data), size));
-}
-
-// ---------------------------------------------------------------------------
-// sendEndOfAudio — empty binary frame signals end-of-stream to the server
-// ---------------------------------------------------------------------------
-
-void RealtimeClientImpl::sendEndOfAudio()
-{
-    _ws.sendBinary("");
-    spdlog::debug("[sonioxpp] Sent end-of-audio signal");
-}
-
-// ---------------------------------------------------------------------------
-// run — blocks until the session finishes (finished:true or connection closed)
-// ---------------------------------------------------------------------------
-
-void RealtimeClientImpl::run()
-{
-    std::unique_lock<std::mutex> lk(_doneMtx);
-    _doneCv.wait(lk, [this] { return _finished.load(); });
-    _ws.stop();
-}
-
-// ---------------------------------------------------------------------------
-// close — send a WebSocket close frame
-// ---------------------------------------------------------------------------
-
-void RealtimeClientImpl::close()
-{
-    _ws.close();
-}
-
-// ---------------------------------------------------------------------------
-// handleMessage — parse incoming JSON and dispatch tokens / errors / finished
-// ---------------------------------------------------------------------------
-
-void RealtimeClientImpl::handleMessage(const std::string& rawMessage)
-{
-    json jsonMessage;
-    try {
-        jsonMessage = json::parse(rawMessage);
-    }
-    catch (const json::exception& ex) {
-        spdlog::warn("[sonioxpp] Failed to parse server message: {}", ex.what());
-        return;
-    }
-
-    // Protocol-level error from the server
-    const std::string errorMsg = jsonMessage.value("error_message", "");
-    if (!errorMsg.empty()) {
-        int errorCode = jsonMessage.value("error_code", 0);
-        spdlog::error("[sonioxpp] Server error {}: {}", errorCode, errorMsg);
-        if (_onError) _onError(RealtimeError{errorCode, errorMsg});
-        return;
-    }
-
-    // Dispatch token batch
-    if (jsonMessage.contains("tokens") && _onTokens) {
-        std::vector<Token> tokens;
-        bool hasFinal = false;
-
-        for (const auto& jsonToken : jsonMessage["tokens"]) {
-            Token token;
-            token.text               = jsonToken.value("text", "");
-            token.is_final           = jsonToken.value("is_final", false);
-            token.speaker            = jsonToken.value("speaker", 0);
-            token.language           = jsonToken.value("language", "");
-            token.translation_status = jsonToken.value("translation_status", "");
-            if (token.is_final) hasFinal = true;
-            tokens.push_back(std::move(token));
+            if (!tokens.empty()) {
+                on_tokens_(tokens, has_final);
+            }
         }
 
-        if (!tokens.empty()) _onTokens(tokens, hasFinal);
+        if (payload.value("finished", false)) {
+            finished_.store(true);
+            done_cv_.notify_all();
+            if (on_finished_) {
+                on_finished_();
+            }
+        }
     }
 
-    // Session completion
-    if (jsonMessage.value("finished", false)) {
-        _finished.store(true);
-        _doneCv.notify_all();
-        if (_onFinished) _onFinished();
-    }
+    SttRealtimeClient realtime_client_;
+
+    std::mutex done_mutex_;
+    std::condition_variable done_cv_;
+    std::atomic<bool> finished_{false};
+};
+
+RealtimeClient::RealtimeClient()
+    : impl_(std::make_unique<RealtimeClientImpl>())
+{
 }
 
-// ---------------------------------------------------------------------------
-// RealtimeClient — public interface (pimpl forwarding)
-// ---------------------------------------------------------------------------
-
-RealtimeClient::RealtimeClient() : impl_(std::make_unique<RealtimeClientImpl>()) {}
 RealtimeClient::~RealtimeClient() = default;
-RealtimeClient::RealtimeClient(RealtimeClient&&)            noexcept = default;
+RealtimeClient::RealtimeClient(RealtimeClient&&) noexcept = default;
 RealtimeClient& RealtimeClient::operator=(RealtimeClient&&) noexcept = default;
 
-void RealtimeClient::setOnTokens(OnTokensCallback cb)    { impl_->_onTokens   = std::move(cb); }
-void RealtimeClient::setOnFinished(OnFinishedCallback cb) { impl_->_onFinished = std::move(cb); }
-void RealtimeClient::setOnError(OnErrorCallback cb)      { impl_->_onError    = std::move(cb); }
+void RealtimeClient::setOnTokens(OnTokensCallback onTokensCallback)
+{
+    impl_->on_tokens_ = std::move(onTokensCallback);
+}
 
-void RealtimeClient::connect(const RealtimeConfig& config) { impl_->connect(config); }
+void RealtimeClient::setOnFinished(OnFinishedCallback onFinishedCallback)
+{
+    impl_->on_finished_ = std::move(onFinishedCallback);
+}
 
-void RealtimeClient::sendAudio(const uint8_t* data, size_t size) {
+void RealtimeClient::setOnError(OnErrorCallback onErrorCallback)
+{
+    impl_->on_error_ = std::move(onErrorCallback);
+}
+
+void RealtimeClient::connect(const RealtimeConfig& config)
+{
+    impl_->connect(config);
+}
+
+void RealtimeClient::sendAudio(const uint8_t* data, size_t size)
+{
     impl_->sendAudio(data, size);
 }
-void RealtimeClient::sendAudio(const std::vector<uint8_t>& data) {
+
+void RealtimeClient::sendAudio(const std::vector<uint8_t>& data)
+{
     impl_->sendAudio(data.data(), data.size());
 }
-void RealtimeClient::sendEndOfAudio() { impl_->sendEndOfAudio(); }
-void RealtimeClient::run()   { impl_->run(); }
-void RealtimeClient::close() { impl_->close(); }
+
+void RealtimeClient::sendEndOfAudio()
+{
+    impl_->sendEndOfAudio();
+}
+
+void RealtimeClient::run()
+{
+    impl_->run();
+}
+
+void RealtimeClient::close()
+{
+    impl_->close();
+}
 
 } // namespace soniox
