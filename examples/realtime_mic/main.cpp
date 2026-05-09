@@ -27,6 +27,7 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 
+#include <CLI/CLI.hpp>
 #include <sonioxpp/soniox.hpp>
 #include <spdlog/spdlog.h>
 
@@ -76,9 +77,8 @@ static void captureCallback(ma_device* device, void* /*output*/,
     auto* state = static_cast<CaptureState*>(device->pUserData);
     if (!input || !state) return;
 
-    // Each frame is one int16_t sample (mono, s16)
-    const size_t    bytes = static_cast<size_t>(frame_count) * sizeof(int16_t);
-    const uint8_t*  src   = static_cast<const uint8_t*>(input);
+    const size_t   bytes = static_cast<size_t>(frame_count) * sizeof(int16_t);
+    const uint8_t* src   = static_cast<const uint8_t*>(input);
 
     {
         std::lock_guard<std::mutex> lk(state->mtx);
@@ -89,86 +89,48 @@ static void captureCallback(ma_device* device, void* /*output*/,
 }
 
 // ---------------------------------------------------------------------------
-// CLI helpers
-// ---------------------------------------------------------------------------
-
-static void printUsage(const char* prog)
-{
-    std::cerr
-        << "Usage:\n"
-        << "  " << prog << " [options]\n\n"
-        << "Options:\n"
-        << "  --lang <code>   Comma-separated language hints (default: en)\n"
-        << "  --diarize       Enable speaker diarization\n"
-        << "  --lang-id       Enable per-token language identification\n"
-        << "  --debug         Enable debug logging\n\n"
-        << "Press Enter or Ctrl+C to stop recording.\n";
-}
-
-static std::vector<std::string> splitLangs(const std::string& s)
-{
-    std::vector<std::string> out;
-    std::string cur;
-    for (char c : s) {
-        if (c == ',') { if (!cur.empty()) { out.push_back(cur); cur.clear(); } }
-        else           cur += c;
-    }
-    if (!cur.empty()) out.push_back(cur);
-    return out;
-}
-
-// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
 int main(int argc, char* argv[])
 {
-    // Register signal handler for Ctrl+C
     std::signal(SIGINT, onSignal);
 
-    // --- API key ---
     const char* api_key_env = std::getenv("SONIOX_API_KEY");
     if (!api_key_env) {
         std::cerr << "Error: SONIOX_API_KEY environment variable is not set.\n";
         return 1;
     }
 
-    // --- Parse arguments ---
-    std::string lang_str = "en";
-    bool        diarize  = false;
-    bool        lang_id  = false;
+    std::vector<std::string> langs{"en"};
+    bool                     diarize = false;
+    bool                     lang_id = false;
+    bool                     debug   = false;
 
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if      (arg == "--lang"   && i + 1 < argc) lang_str = argv[++i];
-        else if (arg == "--diarize")                diarize  = true;
-        else if (arg == "--lang-id")               lang_id  = true;
-        else if (arg == "--debug")
-            spdlog::set_level(spdlog::level::debug);
-        else if (arg == "--help" || arg == "-h") {
-            printUsage(argv[0]);
-            return 0;
-        }
-    }
+    CLI::App app{"Transcribe live microphone audio with Soniox real-time STT"};
+    app.add_option("--lang",   langs,   "Language hints (comma-separated, e.g. en,es)")->delimiter(',');
+    app.add_flag("--diarize",  diarize, "Enable speaker diarization");
+    app.add_flag("--lang-id",  lang_id, "Enable per-token language identification");
+    app.add_flag("--debug",    debug,   "Enable debug logging");
+    CLI11_PARSE(app, argc, argv);
 
-    // --- Build Soniox config ---
+    if (debug) spdlog::set_level(spdlog::level::debug);
+
     soniox::RealtimeConfig config;
     config.api_key                        = api_key_env;
     config.model                          = soniox::stt::models::realtime_v4;
-    config.audio_format                   = soniox::stt::audio_formats::pcm_s16le; // raw 16-bit PCM from mic
+    config.audio_format                   = soniox::stt::audio_formats::pcm_s16le;
     config.sample_rate                    = 16000;
     config.num_channels                   = 1;
-    config.language_hints                 = splitLangs(lang_str);
+    config.language_hints                 = langs;
     config.enable_speaker_diarization     = diarize;
     config.enable_language_identification = lang_id;
     config.enable_endpoint_detection      = true;
 
-    // --- Transcript state ---
     std::string        transcript;
     std::mutex         print_mtx;
     std::atomic<bool>  session_error{false};
 
-    // --- Set up Soniox client callbacks ---
     soniox::RealtimeClient client;
 
     client.setOnTokens([&](const std::vector<soniox::Token>& tokens, bool has_final) {
@@ -178,12 +140,11 @@ int main(int argc, char* argv[])
             for (const auto& tok : tokens)
                 if (tok.is_final) transcript += tok.text;
 
-        // Build live preview: committed transcript + current non-final tail
         std::string preview = transcript;
         if (!has_final)
             for (const auto& tok : tokens) preview += tok.text;
 
-        std::cout << "\r\033[K"                                   // erase line
+        std::cout << "\r\033[K"
                   << (has_final ? "[F] " : "[~] ") << preview
                   << std::flush;
     });
@@ -199,10 +160,9 @@ int main(int argc, char* argv[])
             std::cerr << "\n[Error " << err.error_code << "] " << err.error_message << "\n";
         }
         session_error.store(true, std::memory_order_relaxed);
-        g_stop.store(true, std::memory_order_relaxed); // unblock main loop
+        g_stop.store(true, std::memory_order_relaxed);
     });
 
-    // --- Connect to Soniox ---
     try {
         std::cout << "Connecting to Soniox real-time API...\n";
         client.connect(config);
@@ -212,8 +172,6 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    // --- Configure miniaudio capture device ---
-    // 16 kHz, mono, signed 16-bit PCM — ideal for speech-to-text
     static constexpr ma_uint32 SAMPLE_RATE = 16000;
     static constexpr ma_uint32 CHANNELS    = 1;
 
@@ -233,7 +191,6 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    // --- Sender thread: drain capture queue and forward audio to Soniox ---
     std::thread sender([&] {
         while (true) {
             std::vector<uint8_t> chunk;
@@ -242,30 +199,26 @@ int main(int argc, char* argv[])
                 capture_state.cv.wait(lk, [&] {
                     return !capture_state.queue.empty() || capture_state.stopped;
                 });
-                if (capture_state.queue.empty()) break; // drained after stop
+                if (capture_state.queue.empty()) break;
                 chunk = std::move(capture_state.queue.front());
                 capture_state.queue.pop_front();
             }
             try { client.sendAudio(chunk); }
-            catch (...) { break; } // socket closed (e.g. server error), stop sending
+            catch (...) { break; }
         }
-        // Only send end-of-audio if the session didn't end with an error
         if (!session_error.load(std::memory_order_relaxed)) {
             try { client.sendEndOfAudio(); } catch (...) {}
         }
     });
 
-    // --- Receiver thread: pump the WebSocket and fire callbacks while recording ---
-    // Must run concurrently with capture so tokens are delivered in real time.
     std::thread receiver([&] {
         try {
-            client.run(); // blocks until server sends finished:true
+            client.run();
         } catch (const std::exception& e) {
             std::cerr << "\nReceive error: " << e.what() << "\n";
         }
     });
 
-    // --- Start microphone capture ---
     if (ma_device_start(&device) != MA_SUCCESS) {
         std::cerr << "Failed to start audio capture device.\n";
         ma_device_uninit(&device);
@@ -282,29 +235,24 @@ int main(int argc, char* argv[])
               << " Hz, mono, 16-bit PCM.\n"
               << "Press Enter or Ctrl+C to stop...\n\n";
 
-    // --- Wait for user to press Enter or Ctrl+C ---
-    // A detached thread unblocks the main wait loop when Enter is pressed.
     std::thread([] { std::cin.get(); g_stop.store(true, std::memory_order_relaxed); })
         .detach();
 
     while (!g_stop.load(std::memory_order_relaxed))
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
-    // --- Stop microphone capture ---
     std::cout << "\nStopping microphone...\n";
     ma_device_stop(&device);
 
-    // Signal the sender thread to drain the remaining queue and exit
     {
         std::lock_guard<std::mutex> lk(capture_state.mtx);
         capture_state.stopped = true;
     }
     capture_state.cv.notify_all();
-    sender.join();   // waits for sendEndOfAudio() to be sent
+    sender.join();
 
-    // --- Wait for Soniox to deliver the final transcript ---
     std::cout << "Waiting for final transcript...\n";
-    receiver.join(); // waits until server sends finished:true
+    receiver.join();
 
     ma_device_uninit(&device);
     return 0;

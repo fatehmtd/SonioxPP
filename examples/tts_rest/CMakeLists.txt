@@ -5,4 +5,4 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_executable(soniox_tts_rest main.cpp)
-target_link_libraries(soniox_tts_rest PRIVATE sonioxpp)
+target_link_libraries(soniox_tts_rest PRIVATE sonioxpp CLI11::CLI11)

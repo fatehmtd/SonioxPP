@@ -1,16 +1,10 @@
+#include <CLI/CLI.hpp>
 #include <sonioxpp/soniox.hpp>
 
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <string>
-
-static void printUsage(const char* prog)
-{
-    std::cerr
-        << "Usage:\n"
-        << "  " << prog << " --text <text> [--lang en] [--voice Adrian] [--format wav] [--out out.wav]\n";
-}
 
 int main(int argc, char* argv[])
 {
@@ -21,38 +15,26 @@ int main(int argc, char* argv[])
     }
 
     std::string text;
-    std::string language = "en";
-    std::string voice = "Adrian";
+    std::string language    = "en";
+    std::string voice       = "Adrian";
     std::string audioFormat = "wav";
-    std::string outPath = "tts_output.wav";
+    std::string outPath     = "tts_output.wav";
 
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i];
-        if (arg == "--text" && i + 1 < argc) {
-            text = argv[++i];
-        } else if (arg == "--lang" && i + 1 < argc) {
-            language = argv[++i];
-        } else if (arg == "--voice" && i + 1 < argc) {
-            voice = argv[++i];
-        } else if (arg == "--format" && i + 1 < argc) {
-            audioFormat = argv[++i];
-        } else if (arg == "--out" && i + 1 < argc) {
-            outPath = argv[++i];
-        }
-    }
-
-    if (text.empty()) {
-        printUsage(argv[0]);
-        return 1;
-    }
+    CLI::App app{"Generate speech from text using the Soniox TTS REST API"};
+    app.add_option("--text",   text,        "Text to synthesize")->required();
+    app.add_option("--lang",   language,    "BCP-47 language code");
+    app.add_option("--voice",  voice,       "Voice name (e.g. Adrian, Maya)");
+    app.add_option("--format", audioFormat, "Audio output format (e.g. wav, mp3)");
+    app.add_option("--out",    outPath,     "Output file path");
+    CLI11_PARSE(app, argc, argv);
 
     soniox::TtsRestClient client(apiKeyEnv);
 
     soniox::TtsGenerateRequest request;
-    request.language = language;
-    request.voice = voice;
+    request.language     = language;
+    request.voice        = voice;
     request.audio_format = audioFormat;
-    request.text = text;
+    request.text         = text;
 
     try {
         const auto response = client.generateSpeech(request);
@@ -63,16 +45,16 @@ int main(int argc, char* argv[])
             return 1;
         }
 
-        out.write(reinterpret_cast<const char*>(response.body.data()), static_cast<std::streamsize>(response.body.size()));
+        out.write(reinterpret_cast<const char*>(response.body.data()),
+                  static_cast<std::streamsize>(response.body.size()));
         out.close();
 
         std::cout << "Wrote " << response.body.size() << " bytes to " << outPath << "\n";
 
         if (!response.trailers.empty()) {
             std::cout << "TTS trailers:\n";
-            for (const auto& kv : response.trailers) {
+            for (const auto& kv : response.trailers)
                 std::cout << "  " << kv.first << ": " << kv.second << "\n";
-            }
         }
     } catch (const std::exception& ex) {
         std::cerr << "TTS REST failed: " << ex.what() << "\n";

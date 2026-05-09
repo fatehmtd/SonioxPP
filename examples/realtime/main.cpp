@@ -16,6 +16,7 @@
  * to let the server detect the format automatically).
  */
 
+#include <CLI/CLI.hpp>
 #include <sonioxpp/soniox.hpp>
 #include <spdlog/spdlog.h>
 
@@ -29,89 +30,46 @@
 #include <thread>
 #include <vector>
 
- // ---------------------------------------------------------------------------
- // Helpers
- // ---------------------------------------------------------------------------
-
-static void printUsage(const char* prog)
-{
-    std::cerr
-        << "Usage:\n"
-        << "  " << prog << " <audio_file> [options]\n\n"
-        << "Options:\n"
-        << "  --format <fmt>    Audio format hint (default: auto)\n"
-        << "  --chunk-ms <ms>   Chunk delay in milliseconds (default: 120)\n"
-        << "  --lang <code>     Comma-separated language hints (default: en)\n"
-        << "  --diarize         Enable speaker diarization\n"
-        << "  --lang-id         Enable per-token language identification\n"
-        << "  --debug           Enable debug logging\n";
-}
-
-// Split "en,es" -> {"en", "es"}
-static std::vector<std::string> splitLangs(const std::string& s)
-{
-    std::vector<std::string> out;
-    std::string cur;
-    for (char c : s) {
-        if (c == ',') { if (!cur.empty()) { out.push_back(cur); cur.clear(); } }
-        else           cur += c;
-    }
-    if (!cur.empty()) out.push_back(cur);
-    return out;
-}
-
-// ---------------------------------------------------------------------------
-// main
-// ---------------------------------------------------------------------------
-
 int main(int argc, char* argv[])
 {
-    // --- API key ---
     const char* api_key_env = std::getenv("SONIOX_API_KEY");
     if (!api_key_env) {
         std::cerr << "Error: SONIOX_API_KEY environment variable is not set.\n";
         return 1;
     }
 
-    if (argc < 2) {
-        printUsage(argv[0]);
-        return 1;
-    }
+    std::string              audio_path;
+    std::string              audio_fmt = soniox::stt::audio_formats::auto_detect;
+    int                      chunk_ms  = 120;
+    std::vector<std::string> langs{"en"};
+    bool                     diarize   = false;
+    bool                     lang_id   = false;
+    bool                     debug     = false;
 
-    // --- Parse arguments ---
-    std::string audio_path = argv[1];
-    std::string audio_fmt = soniox::stt::audio_formats::auto_detect;
-    int         chunk_ms = 120;
-    std::string lang_str = "en";
-    bool        diarize = false;
-    bool        lang_id = false;
+    CLI::App app{"Stream an audio file to Soniox real-time STT"};
+    app.add_option("file", audio_path, "Audio file to stream")->required();
+    app.add_option("--format",   audio_fmt, "Audio format hint (default: auto)");
+    app.add_option("--chunk-ms", chunk_ms,  "Chunk delay in milliseconds");
+    app.add_option("--lang",     langs,     "Language hints (comma-separated, e.g. en,es)")->delimiter(',');
+    app.add_flag("--diarize",  diarize,  "Enable speaker diarization");
+    app.add_flag("--lang-id",  lang_id,  "Enable per-token language identification");
+    app.add_flag("--debug",    debug,    "Enable debug logging");
+    CLI11_PARSE(app, argc, argv);
 
-    for (int i = 2; i < argc; ++i) {
-        std::string arg = argv[i];
-        if (arg == "--format" && i + 1 < argc) audio_fmt = argv[++i];
-        else if (arg == "--chunk-ms" && i + 1 < argc) chunk_ms = std::stoi(argv[++i]);
-        else if (arg == "--lang" && i + 1 < argc) lang_str = argv[++i];
-        else if (arg == "--diarize")                  diarize = true;
-        else if (arg == "--lang-id")                  lang_id = true;
-        else if (arg == "--debug")
-            spdlog::set_level(spdlog::level::debug);
-    }
+    if (debug) spdlog::set_level(spdlog::level::debug);
 
-    // --- Build config ---
     soniox::RealtimeConfig config;
-    config.api_key = api_key_env;
-    config.model = soniox::stt::models::realtime_v4;
-    config.audio_format = audio_fmt;
-    config.language_hints = splitLangs(lang_str);
-    config.enable_speaker_diarization = diarize;
+    config.api_key                        = api_key_env;
+    config.model                          = soniox::stt::models::realtime_v4;
+    config.audio_format                   = audio_fmt;
+    config.language_hints                 = langs;
+    config.enable_speaker_diarization     = diarize;
     config.enable_language_identification = lang_id;
-    config.enable_endpoint_detection = true;
+    config.enable_endpoint_detection      = true;
 
-    // --- State ---
-    std::string transcript;   // accumulates final tokens
+    std::string transcript;
     std::mutex  print_mtx;
 
-    // --- Client callbacks ---
     soniox::RealtimeClient client;
 
     client.setOnTokens([&](const std::vector<soniox::Token>& tokens, bool has_final) {
@@ -122,28 +80,25 @@ int main(int argc, char* argv[])
                 if (tok.is_final) transcript += tok.text;
         }
 
-        // Build live preview: final transcript + current non-final tail
         std::string preview = transcript;
         if (!has_final)
             for (auto& tok : tokens) preview += tok.text;
 
-        // Overwrite current line
-        std::cout << "\r\033[K";   // carriage-return + erase line
+        std::cout << "\r\033[K";
         std::cout << (has_final ? "[F] " : "[~] ") << preview << std::flush;
         if (has_final) std::cout << std::endl << std::endl;
-        });
+    });
 
     client.setOnFinished([&] {
         std::lock_guard<std::mutex> lk(print_mtx);
         std::cout << "\n\n=== Session complete ===\n" << transcript << "\n";
-        });
+    });
 
     client.setOnError([&](const soniox::RealtimeError& err) {
         std::lock_guard<std::mutex> lk(print_mtx);
         std::cerr << "\n[Error " << err.error_code << "] " << err.error_message << "\n";
-        });
+    });
 
-    // --- Connect ---
     try {
         std::cout << "Connecting to Soniox real-time API...\n";
         client.connect(config);
@@ -154,7 +109,6 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    // --- Stream audio in a background thread ---
     static constexpr size_t CHUNK_BYTES = 4096;
 
     std::thread sender([&] {
@@ -167,16 +121,15 @@ int main(int argc, char* argv[])
 
         std::vector<uint8_t> buf(CHUNK_BYTES);
         while (f.read(reinterpret_cast<char*>(buf.data()), CHUNK_BYTES) ||
-            f.gcount() > 0)
+               f.gcount() > 0)
         {
             client.sendAudio(buf.data(), static_cast<size_t>(f.gcount()));
             std::this_thread::sleep_for(std::chrono::milliseconds(chunk_ms));
         }
 
         client.sendEndOfAudio();
-        });
+    });
 
-    // --- Receive loop (blocks until finished or error) ---
     try {
         client.run();
     }

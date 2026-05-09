@@ -14,6 +14,7 @@ target_link_libraries(soniox_realtime_mic
     PRIVATE
         sonioxpp
         spdlog::spdlog
+        CLI11::CLI11
 )
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@
  *   --debug         Enable debug logging
  */
 
+#include <CLI/CLI.hpp>
 #include <sonioxpp/soniox.hpp>
 #include <spdlog/spdlog.h>
 
@@ -31,41 +32,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-static void printUsage(const char* prog)
-{
-    std::cerr
-        << "Usage:\n"
-        << "  " << prog << " <audio_file>   [options]\n"
-        << "  " << prog << " --url <url>    [options]\n\n"
-        << "Options:\n"
-        << "  --lang <code>    Comma-separated language hints (default: en)\n"
-        << "  --diarize        Enable speaker diarization\n"
-        << "  --lang-id        Enable per-token language identification\n"
-        << "  --poll-ms <ms>   Polling interval (default: 1000)\n"
-        << "  --no-cleanup     Keep job and file after completion\n"
-        << "  --debug          Enable debug logging\n";
-}
-
-static std::vector<std::string> splitLangs(const std::string& s)
-{
-    std::vector<std::string> out;
-    std::string cur;
-    for (char c : s) {
-        if (c == ',') { if (!cur.empty()) { out.push_back(cur); cur.clear(); } }
-        else           cur += c;
-    }
-    if (!cur.empty()) out.push_back(cur);
-    return out;
-}
-
-// ---------------------------------------------------------------------------
-// Transcript rendering
-// ---------------------------------------------------------------------------
 
 static void renderTranscript(const std::vector<soniox::Token>& tokens, bool diarize)
 {
@@ -85,58 +51,46 @@ static void renderTranscript(const std::vector<soniox::Token>& tokens, bool diar
     std::cout << "\n==================\n";
 }
 
-// ---------------------------------------------------------------------------
-// main
-// ---------------------------------------------------------------------------
-
 int main(int argc, char* argv[])
 {
-    // --- API key ---
     const char* api_key_env = std::getenv("SONIOX_API_KEY");
     if (!api_key_env) {
         std::cerr << "Error: SONIOX_API_KEY environment variable is not set.\n";
         return 1;
     }
 
-    if (argc < 2) {
-        printUsage(argv[0]);
-        return 1;
-    }
+    std::string              audio_path;
+    std::string              audio_url;
+    std::vector<std::string> langs{"en"};
+    bool                     diarize    = false;
+    bool                     lang_id    = false;
+    bool                     no_cleanup = false;
+    int                      poll_ms    = 1000;
+    bool                     debug      = false;
 
-    // --- Parse arguments ---
-    std::string audio_path;
-    std::string audio_url;
-    std::string lang_str  = "en";
-    bool        diarize   = false;
-    bool        lang_id   = false;
-    bool        cleanup   = true;
-    int         poll_ms   = 1000;
-
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
-        if      (arg == "--url"      && i + 1 < argc) audio_url  = argv[++i];
-        else if (arg == "--lang"     && i + 1 < argc) lang_str   = argv[++i];
-        else if (arg == "--poll-ms"  && i + 1 < argc) poll_ms    = std::stoi(argv[++i]);
-        else if (arg == "--diarize")                  diarize    = true;
-        else if (arg == "--lang-id")                  lang_id    = true;
-        else if (arg == "--no-cleanup")               cleanup    = false;
-        else if (arg == "--debug")
-            spdlog::set_level(spdlog::level::debug);
-        else if (arg[0] != '-')
-            audio_path = arg;
-    }
+    CLI::App app{"Transcribe audio via the Soniox async REST API"};
+    app.add_option("file",       audio_path, "Local audio file to transcribe");
+    app.add_option("--url",      audio_url,  "Public HTTPS URL of the audio file");
+    app.add_option("--lang",     langs,      "Language hints (comma-separated, e.g. en,es)")->delimiter(',');
+    app.add_option("--poll-ms",  poll_ms,    "Polling interval in milliseconds");
+    app.add_flag("--diarize",    diarize,    "Enable speaker diarization");
+    app.add_flag("--lang-id",    lang_id,    "Enable per-token language identification");
+    app.add_flag("--no-cleanup", no_cleanup, "Keep job and file after completion");
+    app.add_flag("--debug",      debug,      "Enable debug logging");
+    CLI11_PARSE(app, argc, argv);
 
     if (audio_path.empty() && audio_url.empty()) {
-        std::cerr << "Error: provide an audio file or --url <url>.\n";
-        printUsage(argv[0]);
+        std::cerr << "Error: provide an audio file or --url <url>.\n" << app.help();
         return 1;
     }
 
-    // --- Build config ---
+    if (debug) spdlog::set_level(spdlog::level::debug);
+    bool cleanup = !no_cleanup;
+
     soniox::AsyncConfig config;
     config.api_key                        = api_key_env;
     config.model                          = soniox::stt::models::async_v4;
-    config.language_hints                 = splitLangs(lang_str);
+    config.language_hints                 = langs;
     config.enable_speaker_diarization     = diarize;
     config.enable_language_identification = lang_id;
 
@@ -144,13 +98,11 @@ int main(int argc, char* argv[])
 
     try {
         if (!audio_path.empty()) {
-            // --- Convenience path: single call handles everything ---
             std::cout << "Uploading and transcribing: " << audio_path << "\n";
             auto tokens = client.transcribeFile(audio_path, config, poll_ms);
             renderTranscript(tokens, diarize);
 
         } else {
-            // --- Step-by-step path: useful for URLs or manual control ---
             config.audio_url = audio_url;
             std::cout << "Creating transcription from URL: " << audio_url << "\n";
 

@@ -32,6 +32,8 @@ A C++17 library for the [Soniox](https://soniox.com) API — real-time and async
 | nlohmann/json 3.12 | ✓ | |
 | spdlog 1.15 | ✓ | |
 | miniaudio 0.11 | ✓ | Microphone example only |
+| cppcodec 0.2 | ✓ | Base64 codec — TTS examples only |
+| CLI11 2.4 | ✓ | Argument parsing — examples only |
 
 On **Windows** all TLS and WebSocket I/O uses the built-in Schannel and WinHTTP APIs — no OpenSSL required.
 
@@ -546,16 +548,32 @@ export SONIOX_API_KEY=your_key
 # Real-time STT from microphone (press Enter or Ctrl+C to stop)
 ./build/examples/realtime_mic/soniox_realtime_mic --lang en --diarize
 
+# Real-time STT with translation (streams original + translated text side by side)
+./build/examples/realtime_translation/soniox_realtime_translation audio.wav --src-lang en --tgt-lang es
+
 # Async STT (local file)
 ./build/examples/async/soniox_async audio.wav --diarize
 # Async STT (public URL)
 ./build/examples/async/soniox_async --url https://example.com/audio.wav
+
+# Async STT with per-token timestamps and confidence scores (tab-separated table)
+./build/examples/async_timestamps/soniox_async_timestamps audio.wav --diarize --lang-id
+# Same, rendered as SRT subtitles
+./build/examples/async_timestamps/soniox_async_timestamps audio.wav --output srt
 
 # TTS REST
 ./build/examples/tts_rest/soniox_tts_rest --text "Hello from Soniox" --out speech.wav
 
 # TTS real-time
 ./build/examples/tts_realtime/soniox_tts_realtime --text "Hello from real-time TTS" --out speech_rt.wav
+
+# TTS WebSocket multiplexing (3 concurrent streams — English, Spanish, French)
+./build/examples/tts_multiplex/soniox_tts_multiplex
+
+# TTS incremental text streaming (word-by-word, reports time-to-first-audio)
+echo "The quick brown fox jumps over the lazy dog" | \
+    ./build/examples/tts_streaming_text/soniox_tts_streaming_text --word-delay-ms 100
+./build/examples/tts_streaming_text/soniox_tts_streaming_text --file text.txt --voice Maya
 ```
 
 ---

@@ -150,6 +150,15 @@ if(SONIOX_BUILD_EXAMPLES)
     endif()
     add_library(cppcodec INTERFACE)
     target_include_directories(cppcodec INTERFACE ${cppcodec_SOURCE_DIR})
+
+    # CLI11 — header-only argument parsing library, used by all examples
+    fetchcontent_declare(
+        cli11
+        GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
+        GIT_TAG        v2.4.2
+        GIT_SHALLOW    TRUE
+    )
+    fetchcontent_makeavailable(cli11)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -168,4 +177,8 @@ if(SONIOX_BUILD_EXAMPLES)
     add_subdirectory(examples/realtime_mic)
     add_subdirectory(examples/tts_rest)
     add_subdirectory(examples/tts_realtime)
+    add_subdirectory(examples/realtime_translation)
+    add_subdirectory(examples/async_timestamps)
+    add_subdirectory(examples/tts_multiplex)
+    add_subdirectory(examples/tts_streaming_text)
 endif()
