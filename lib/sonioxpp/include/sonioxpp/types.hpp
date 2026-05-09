@@ -15,6 +15,7 @@
 namespace soniox {
 
 constexpr const char* USER_AGENT = "sonioxpp/1.0";
+constexpr const char* SONIOX_BASE_URL = "https://api.soniox.com";
 
 // ---------------------------------------------------------------------------
 // Data structures

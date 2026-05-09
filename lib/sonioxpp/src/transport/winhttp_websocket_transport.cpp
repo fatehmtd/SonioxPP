@@ -67,85 +67,85 @@ ParsedWsUrl parseWsUrl(const std::string& url)
 } // namespace
 
 struct WinHttpWebSocketTransport::Impl {
-    HINTERNET session{nullptr};
-    HINTERNET connection{nullptr};
-    HINTERNET request{nullptr};
-    HINTERNET websocket{nullptr};
-    std::thread receive_thread;
+    HINTERNET _session{nullptr};
+    HINTERNET _connection{nullptr};
+    HINTERNET _request{nullptr};
+    HINTERNET _websocket{nullptr};
+    std::thread _receiveThread;
 };
 
-WinHttpWebSocketTransport::WinHttpWebSocketTransport() : impl_(std::make_unique<Impl>()) {}
+WinHttpWebSocketTransport::WinHttpWebSocketTransport() : _impl(std::make_unique<Impl>()) {}
 
 WinHttpWebSocketTransport::~WinHttpWebSocketTransport()
 {
     close();
-    if (impl_->receive_thread.joinable()) {
-        impl_->receive_thread.join();
+    if (_impl->_receiveThread.joinable()) {
+        _impl->_receiveThread.join();
     }
-    if (impl_->websocket)   { WinHttpCloseHandle(impl_->websocket);   impl_->websocket   = nullptr; }
-    if (impl_->request)     { WinHttpCloseHandle(impl_->request);     impl_->request     = nullptr; }
-    if (impl_->connection)  { WinHttpCloseHandle(impl_->connection);  impl_->connection  = nullptr; }
-    if (impl_->session)     { WinHttpCloseHandle(impl_->session);     impl_->session     = nullptr; }
+    if (_impl->_websocket)   { WinHttpCloseHandle(_impl->_websocket);   _impl->_websocket   = nullptr; }
+    if (_impl->_request)     { WinHttpCloseHandle(_impl->_request);     _impl->_request     = nullptr; }
+    if (_impl->_connection)  { WinHttpCloseHandle(_impl->_connection);  _impl->_connection  = nullptr; }
+    if (_impl->_session)     { WinHttpCloseHandle(_impl->_session);     _impl->_session     = nullptr; }
 }
 
 void WinHttpWebSocketTransport::setOnOpen(OpenHandler handler)
 {
-    std::lock_guard<std::mutex> guard(callback_mutex_);
-    on_open_ = std::move(handler);
+    std::lock_guard<std::mutex> guard(_callbackMutex);
+    _onOpen = std::move(handler);
 }
 
 void WinHttpWebSocketTransport::setOnTextMessage(TextMessageHandler handler)
 {
-    std::lock_guard<std::mutex> guard(callback_mutex_);
-    on_text_ = std::move(handler);
+    std::lock_guard<std::mutex> guard(_callbackMutex);
+    _onText = std::move(handler);
 }
 
 void WinHttpWebSocketTransport::setOnBinaryMessage(BinaryMessageHandler handler)
 {
-    std::lock_guard<std::mutex> guard(callback_mutex_);
-    on_binary_ = std::move(handler);
+    std::lock_guard<std::mutex> guard(_callbackMutex);
+    _onBinary = std::move(handler);
 }
 
 void WinHttpWebSocketTransport::setOnError(ErrorHandler handler)
 {
-    std::lock_guard<std::mutex> guard(callback_mutex_);
-    on_error_ = std::move(handler);
+    std::lock_guard<std::mutex> guard(_callbackMutex);
+    _onError = std::move(handler);
 }
 
 void WinHttpWebSocketTransport::setOnClose(CloseHandler handler)
 {
-    std::lock_guard<std::mutex> guard(callback_mutex_);
-    on_close_ = std::move(handler);
+    std::lock_guard<std::mutex> guard(_callbackMutex);
+    _onClose = std::move(handler);
 }
 
 void WinHttpWebSocketTransport::connect(const WebSocketConnectOptions& options)
 {
     const ParsedWsUrl url = parseWsUrl(options.url);
 
-    impl_->session = WinHttpOpen(
+    _impl->_session = WinHttpOpen(
         L"SonioxPP/1.0",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME,
         WINHTTP_NO_PROXY_BYPASS,
         0);
-    if (!impl_->session) {
+    if (!_impl->_session) {
         throw std::runtime_error("[sonioxpp] WinHttpOpen failed: " + std::to_string(GetLastError()));
     }
 
-    impl_->connection = WinHttpConnect(impl_->session, url.host.c_str(), url.port, 0);
-    if (!impl_->connection) {
+    _impl->_connection = WinHttpConnect(_impl->_session, url.host.c_str(), url.port, 0);
+    if (!_impl->_connection) {
         throw std::runtime_error("[sonioxpp] WinHttpConnect failed: " + std::to_string(GetLastError()));
     }
 
     const DWORD reqFlags = WINHTTP_FLAG_BYPASS_PROXY_CACHE | (url.secure ? WINHTTP_FLAG_SECURE : 0);
-    impl_->request = WinHttpOpenRequest(
-        impl_->connection, L"GET", url.path.c_str(),
+    _impl->_request = WinHttpOpenRequest(
+        _impl->_connection, L"GET", url.path.c_str(),
         nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, reqFlags);
-    if (!impl_->request) {
+    if (!_impl->_request) {
         throw std::runtime_error("[sonioxpp] WinHttpOpenRequest failed: " + std::to_string(GetLastError()));
     }
 
-    if (!WinHttpSetOption(impl_->request, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0)) {
+    if (!WinHttpSetOption(_impl->_request, WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET, nullptr, 0)) {
         throw std::runtime_error("[sonioxpp] WINHTTP_OPTION_UPGRADE_TO_WEB_SOCKET failed: " + std::to_string(GetLastError()));
     }
 
@@ -153,47 +153,47 @@ void WinHttpWebSocketTransport::connect(const WebSocketConnectOptions& options)
         const std::wstring header =
             std::wstring(key.begin(), key.end()) + L": " +
             std::wstring(value.begin(), value.end()) + L"\r\n";
-        WinHttpAddRequestHeaders(impl_->request, header.c_str(),
+        WinHttpAddRequestHeaders(_impl->_request, header.c_str(),
                                   static_cast<DWORD>(-1L), WINHTTP_ADDREQ_FLAG_ADD);
     }
 
-    if (!WinHttpSendRequest(impl_->request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+    if (!WinHttpSendRequest(_impl->_request, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                              WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
         throw std::runtime_error("[sonioxpp] WinHttpSendRequest failed: " + std::to_string(GetLastError()));
     }
 
-    if (!WinHttpReceiveResponse(impl_->request, nullptr)) {
+    if (!WinHttpReceiveResponse(_impl->_request, nullptr)) {
         throw std::runtime_error("[sonioxpp] WinHttpReceiveResponse failed: " + std::to_string(GetLastError()));
     }
 
-    impl_->websocket = WinHttpWebSocketCompleteUpgrade(impl_->request, 0);
-    if (!impl_->websocket) {
+    _impl->_websocket = WinHttpWebSocketCompleteUpgrade(_impl->_request, 0);
+    if (!_impl->_websocket) {
         throw std::runtime_error("[sonioxpp] WinHttpWebSocketCompleteUpgrade failed: " + std::to_string(GetLastError()));
     }
 
-    is_open_.store(true);
+    _isOpen.store(true);
 
     // Background thread: receive loop with fragment reassembly
-    impl_->receive_thread = std::thread([this] {
+    _impl->_receiveThread = std::thread([this] {
         std::vector<std::uint8_t> frame(65536);
         std::vector<std::uint8_t> message;
         bool pending_binary = false;
 
-        while (is_open_.load()) {
+        while (_isOpen.load()) {
             DWORD bytes_read = 0;
             WINHTTP_WEB_SOCKET_BUFFER_TYPE buf_type{};
 
             const DWORD rc = WinHttpWebSocketReceive(
-                impl_->websocket,
+                _impl->_websocket,
                 frame.data(), static_cast<DWORD>(frame.size()),
                 &bytes_read, &buf_type);
 
             if (rc != ERROR_SUCCESS) {
-                if (is_open_.exchange(false)) {
+                if (_isOpen.exchange(false)) {
                     ErrorHandler cb;
                     {
-                        std::lock_guard<std::mutex> g(callback_mutex_);
-                        cb = on_error_;
+                        std::lock_guard<std::mutex> g(_callbackMutex);
+                        cb = _onError;
                     }
                     if (cb) {
                         cb("[sonioxpp] WebSocket receive error: " + std::to_string(rc));
@@ -220,8 +220,8 @@ void WinHttpWebSocketTransport::connect(const WebSocketConnectOptions& options)
                 message.insert(message.end(), begin, end);
                 TextMessageHandler cb;
                 {
-                    std::lock_guard<std::mutex> g(callback_mutex_);
-                    cb = on_text_;
+                    std::lock_guard<std::mutex> g(_callbackMutex);
+                    cb = _onText;
                 }
                 if (cb) {
                     cb(std::string(message.begin(), message.end()));
@@ -235,8 +235,8 @@ void WinHttpWebSocketTransport::connect(const WebSocketConnectOptions& options)
                 message.insert(message.end(), begin, end);
                 BinaryMessageHandler cb;
                 {
-                    std::lock_guard<std::mutex> g(callback_mutex_);
-                    cb = on_binary_;
+                    std::lock_guard<std::mutex> g(_callbackMutex);
+                    cb = _onBinary;
                 }
                 if (cb) {
                     cb(message);
@@ -247,12 +247,12 @@ void WinHttpWebSocketTransport::connect(const WebSocketConnectOptions& options)
             }
 
             case WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE:
-                is_open_.store(false);
+                _isOpen.store(false);
                 {
                     CloseHandler cb;
                     {
-                        std::lock_guard<std::mutex> g(callback_mutex_);
-                        cb = on_close_;
+                        std::lock_guard<std::mutex> g(_callbackMutex);
+                        cb = _onClose;
                     }
                     if (cb) {
                         cb();
@@ -268,8 +268,8 @@ void WinHttpWebSocketTransport::connect(const WebSocketConnectOptions& options)
 
     OpenHandler cb;
     {
-        std::lock_guard<std::mutex> guard(callback_mutex_);
-        cb = on_open_;
+        std::lock_guard<std::mutex> guard(_callbackMutex);
+        cb = _onOpen;
     }
     if (cb) {
         cb();
@@ -278,11 +278,11 @@ void WinHttpWebSocketTransport::connect(const WebSocketConnectOptions& options)
 
 void WinHttpWebSocketTransport::sendText(const std::string& message)
 {
-    if (!is_open_.load()) {
+    if (!_isOpen.load()) {
         throw std::runtime_error("[sonioxpp] WebSocket is not open");
     }
     const DWORD rc = WinHttpWebSocketSend(
-        impl_->websocket,
+        _impl->_websocket,
         WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE,
         // WinHttpWebSocketSend takes non-const void* but does not modify the buffer
         const_cast<void*>(static_cast<const void*>(message.data())),
@@ -294,11 +294,11 @@ void WinHttpWebSocketTransport::sendText(const std::string& message)
 
 void WinHttpWebSocketTransport::sendBinary(const std::vector<std::uint8_t>& payload)
 {
-    if (!is_open_.load()) {
+    if (!_isOpen.load()) {
         throw std::runtime_error("[sonioxpp] WebSocket is not open");
     }
     const DWORD rc = WinHttpWebSocketSend(
-        impl_->websocket,
+        _impl->_websocket,
         WINHTTP_WEB_SOCKET_BINARY_MESSAGE_BUFFER_TYPE,
         const_cast<void*>(static_cast<const void*>(payload.data())),
         static_cast<DWORD>(payload.size()));
@@ -309,17 +309,17 @@ void WinHttpWebSocketTransport::sendBinary(const std::vector<std::uint8_t>& payl
 
 void WinHttpWebSocketTransport::close()
 {
-    if (!is_open_.exchange(false)) {
+    if (!_isOpen.exchange(false)) {
         return;
     }
-    if (impl_->websocket) {
-        WinHttpWebSocketClose(impl_->websocket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0);
+    if (_impl->_websocket) {
+        WinHttpWebSocketClose(_impl->_websocket, WINHTTP_WEB_SOCKET_SUCCESS_CLOSE_STATUS, nullptr, 0);
     }
 }
 
 bool WinHttpWebSocketTransport::isOpen() const
 {
-    return is_open_.load();
+    return _isOpen.load();
 }
 
 } // namespace soniox::transport

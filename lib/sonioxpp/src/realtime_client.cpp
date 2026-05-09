@@ -51,21 +51,21 @@ json buildTranslationJson(const Translation& translation)
 class RealtimeClientImpl {
 public:
     RealtimeClientImpl()
-        : realtime_client_()
+        : _realtimeClient()
     {
-        realtime_client_.setOnMessage([this](const std::string& raw) { handleMessage(raw); });
+        _realtimeClient.setOnMessage([this](const std::string& raw) { handleMessage(raw); });
 
-        realtime_client_.setOnError([this](const std::string& message) {
-            if (on_error_) {
-                on_error_(RealtimeError{0, message});
+        _realtimeClient.setOnError([this](const std::string& message) {
+            if (_onError) {
+                _onError(RealtimeError{0, message});
             }
-            finished_.store(true);
-            done_cv_.notify_all();
+            _finished.store(true);
+            _doneCv.notify_all();
         });
 
-        realtime_client_.setOnClosed([this] {
-            finished_.store(true);
-            done_cv_.notify_all();
+        _realtimeClient.setOnClosed([this] {
+            _finished.store(true);
+            _doneCv.notify_all();
         });
     }
 
@@ -92,8 +92,8 @@ public:
             request.translation_json = translation.dump();
         }
 
-        finished_.store(false);
-        realtime_client_.connect(request);
+        _finished.store(false);
+        _realtimeClient.connect(request);
     }
 
     void sendAudio(const uint8_t* data, size_t size)
@@ -103,28 +103,28 @@ public:
         }
 
         std::vector<std::uint8_t> bytes(data, data + size);
-        realtime_client_.sendAudio(bytes);
+        _realtimeClient.sendAudio(bytes);
     }
 
     void sendEndOfAudio()
     {
-        realtime_client_.sendEndOfAudio();
+        _realtimeClient.sendEndOfAudio();
     }
 
     void run()
     {
-        std::unique_lock<std::mutex> lock(done_mutex_);
-        done_cv_.wait(lock, [this] { return finished_.load(); });
+        std::unique_lock<std::mutex> lock(_doneMutex);
+        _doneCv.wait(lock, [this] { return _finished.load(); });
     }
 
     void close()
     {
-        realtime_client_.close();
+        _realtimeClient.close();
     }
 
-    OnTokensCallback on_tokens_;
-    OnFinishedCallback on_finished_;
-    OnErrorCallback on_error_;
+    OnTokensCallback _onTokens;
+    OnFinishedCallback _onFinished;
+    OnErrorCallback _onError;
 
 private:
     void handleMessage(const std::string& rawMessage)
@@ -139,13 +139,13 @@ private:
         const std::string error_message = payload.value("error_message", std::string());
         if (!error_message.empty()) {
             const int error_code = payload.value("error_code", 0);
-            if (on_error_) {
-                on_error_(RealtimeError{error_code, error_message});
+            if (_onError) {
+                _onError(RealtimeError{error_code, error_message});
             }
             return;
         }
 
-        if (payload.contains("tokens") && payload["tokens"].is_array() && on_tokens_) {
+        if (payload.contains("tokens") && payload["tokens"].is_array() && _onTokens) {
             std::vector<Token> tokens;
             bool has_final = false;
 
@@ -163,28 +163,28 @@ private:
             }
 
             if (!tokens.empty()) {
-                on_tokens_(tokens, has_final);
+                _onTokens(tokens, has_final);
             }
         }
 
         if (payload.value("finished", false)) {
-            finished_.store(true);
-            done_cv_.notify_all();
-            if (on_finished_) {
-                on_finished_();
+            _finished.store(true);
+            _doneCv.notify_all();
+            if (_onFinished) {
+                _onFinished();
             }
         }
     }
 
-    SttRealtimeClient realtime_client_;
+    SttRealtimeClient _realtimeClient;
 
-    std::mutex done_mutex_;
-    std::condition_variable done_cv_;
-    std::atomic<bool> finished_{false};
+    std::mutex _doneMutex;
+    std::condition_variable _doneCv;
+    std::atomic<bool> _finished{false};
 };
 
 RealtimeClient::RealtimeClient()
-    : impl_(std::make_unique<RealtimeClientImpl>())
+    : _impl(std::make_unique<RealtimeClientImpl>())
 {
 }
 
@@ -194,47 +194,47 @@ RealtimeClient& RealtimeClient::operator=(RealtimeClient&&) noexcept = default;
 
 void RealtimeClient::setOnTokens(OnTokensCallback onTokensCallback)
 {
-    impl_->on_tokens_ = std::move(onTokensCallback);
+    _impl->_onTokens = std::move(onTokensCallback);
 }
 
 void RealtimeClient::setOnFinished(OnFinishedCallback onFinishedCallback)
 {
-    impl_->on_finished_ = std::move(onFinishedCallback);
+    _impl->_onFinished = std::move(onFinishedCallback);
 }
 
 void RealtimeClient::setOnError(OnErrorCallback onErrorCallback)
 {
-    impl_->on_error_ = std::move(onErrorCallback);
+    _impl->_onError = std::move(onErrorCallback);
 }
 
 void RealtimeClient::connect(const RealtimeConfig& config)
 {
-    impl_->connect(config);
+    _impl->connect(config);
 }
 
 void RealtimeClient::sendAudio(const uint8_t* data, size_t size)
 {
-    impl_->sendAudio(data, size);
+    _impl->sendAudio(data, size);
 }
 
 void RealtimeClient::sendAudio(const std::vector<uint8_t>& data)
 {
-    impl_->sendAudio(data.data(), data.size());
+    _impl->sendAudio(data.data(), data.size());
 }
 
 void RealtimeClient::sendEndOfAudio()
 {
-    impl_->sendEndOfAudio();
+    _impl->sendEndOfAudio();
 }
 
 void RealtimeClient::run()
 {
-    impl_->run();
+    _impl->run();
 }
 
 void RealtimeClient::close()
 {
-    impl_->close();
+    _impl->close();
 }
 
 } // namespace soniox

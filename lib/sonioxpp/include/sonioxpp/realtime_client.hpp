@@ -113,7 +113,7 @@ public:
     void close();
 
 private:
-    std::unique_ptr<RealtimeClientImpl> impl_;
+    std::unique_ptr<RealtimeClientImpl> _impl;
 };
 
 } // namespace soniox

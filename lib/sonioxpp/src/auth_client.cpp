@@ -59,12 +59,12 @@ AuthClient::AuthClient(
     std::string api_key,
     std::shared_ptr<transport::IHttpTransport> http_transport,
     std::string base_url)
-    : api_key_(std::move(api_key)),
-      base_url_(std::move(base_url)),
-      http_transport_(std::move(http_transport))
+    : _apiKey(std::move(api_key)),
+      _baseUrl(std::move(base_url)),
+      _httpTransport(std::move(http_transport))
 {
-    if (!http_transport_) {
-        http_transport_ = std::make_shared<transport::CurlHttpTransport>();
+    if (!_httpTransport) {
+        _httpTransport = std::make_shared<transport::CurlHttpTransport>();
     }
 }
 
@@ -86,13 +86,13 @@ std::string AuthClient::createTemporaryApiKey(const TemporaryApiKeyRequest& requ
 
     transport::HttpRequest http_request;
     http_request.method = transport::HttpMethod::Post;
-    http_request.url = base_url_ + "/v1/auth/temporary-api-key";
+    http_request.url = _baseUrl + "/v1/auth/temporary-api-key";
     http_request.content_type = "application/json";
     http_request.body = body.dump();
-    http_request.headers["Authorization"] = "Bearer " + api_key_;
-    http_request.headers["User-Agent"] = "sonioxpp/2.0";
+    http_request.headers["Authorization"] = "Bearer " + _apiKey;
+    http_request.headers["User-Agent"] = soniox::USER_AGENT;
 
-    const auto response = http_transport_->send(http_request);
+    const auto response = _httpTransport->send(http_request);
     throwIfError(response, "create temporary API key");
 
     return std::string(response.body.begin(), response.body.end());

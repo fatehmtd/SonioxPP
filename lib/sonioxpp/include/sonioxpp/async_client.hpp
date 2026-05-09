@@ -135,7 +135,7 @@ public:
         int                poll_interval_ms = 1000);
 
 private:
-    std::unique_ptr<AsyncClientImpl> impl_;
+    std::unique_ptr<AsyncClientImpl> _impl;
 };
 
 } // namespace soniox

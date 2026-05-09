@@ -1,5 +1,7 @@
 #include <sonioxpp/soniox.hpp>
 
+#include <cppcodec/base64_rfc4648.hpp>
+
 #include <atomic>
 #include <condition_variable>
 #include <cstdlib>
@@ -10,51 +12,6 @@
 #include <vector>
 
 namespace {
-
-std::vector<std::uint8_t> base64Decode(const std::string& input)
-{
-    static const int decodeTable[256] = {
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,
-        52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,
-        -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
-        15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,
-        -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
-        41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-        -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-    };
-
-    std::vector<std::uint8_t> output;
-    output.reserve((input.size() * 3) / 4);
-
-    int val = 0;
-    int valb = -8;
-    for (const unsigned char c : input) {
-        if (c == '=') {
-            break;
-        }
-        const int d = decodeTable[c];
-        if (d == -1) {
-            continue;
-        }
-        val = (val << 6) + d;
-        valb += 6;
-        if (valb >= 0) {
-            output.push_back(static_cast<std::uint8_t>((val >> valb) & 0xFF));
-            valb -= 8;
-        }
-    }
-
-    return output;
-}
 
 void printUsage(const char* prog)
 {
@@ -113,7 +70,7 @@ int main(int argc, char* argv[])
 
     client.setOnParsedMessage([&](const soniox::TtsRealtimeMessage& message) {
         if (!message.audio.empty()) {
-            auto bytes = base64Decode(message.audio);
+            auto bytes = cppcodec::base64_rfc4648::decode(message.audio);
             out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
         }
 

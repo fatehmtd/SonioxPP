@@ -60,18 +60,18 @@ std::string parseRequiredId(const std::string& body, const char* operation)
 class AsyncClientImpl {
 public:
     explicit AsyncClientImpl(const std::string& apiKey)
-        : rest_client_(apiKey)
+        : _restClient(apiKey)
     {
     }
 
     std::string uploadFile(const std::string& filePath)
     {
-        return parseRequiredId(rest_client_.uploadFile(filePath), "uploadFile");
+        return parseRequiredId(_restClient.uploadFile(filePath), "uploadFile");
     }
 
     void deleteFile(const std::string& fileId)
     {
-        rest_client_.deleteFile(fileId);
+        _restClient.deleteFile(fileId);
     }
 
     std::string createTranscription(const AsyncConfig& config)
@@ -98,12 +98,12 @@ public:
             request.translation_json = translation.dump();
         }
 
-        return parseRequiredId(rest_client_.createTranscription(request), "createTranscription");
+        return parseRequiredId(_restClient.createTranscription(request), "createTranscription");
     }
 
     AsyncTranscription getTranscription(const std::string& transcriptionId)
     {
-        const json payload = json::parse(rest_client_.getTranscription(transcriptionId));
+        const json payload = json::parse(_restClient.getTranscription(transcriptionId));
 
         AsyncTranscription result;
         result.id = payload.value("id", transcriptionId);
@@ -125,7 +125,7 @@ public:
 
     std::vector<Token> getTranscript(const std::string& transcriptionId)
     {
-        const json payload = json::parse(rest_client_.getTranscriptionTranscript(transcriptionId));
+        const json payload = json::parse(_restClient.getTranscriptionTranscript(transcriptionId));
 
         std::vector<Token> tokens;
         if (!payload.contains("tokens") || !payload["tokens"].is_array()) {
@@ -156,7 +156,7 @@ public:
 
     void deleteTranscription(const std::string& transcriptionId)
     {
-        rest_client_.deleteTranscription(transcriptionId);
+        _restClient.deleteTranscription(transcriptionId);
     }
 
     std::vector<Token> transcribeFile(const std::string& filePath, AsyncConfig config, int pollIntervalMs)
@@ -189,11 +189,11 @@ public:
     }
 
 private:
-    SttRestClient rest_client_;
+    SttRestClient _restClient;
 };
 
 AsyncClient::AsyncClient(const std::string& apiKey)
-    : impl_(std::make_unique<AsyncClientImpl>(apiKey))
+    : _impl(std::make_unique<AsyncClientImpl>(apiKey))
 {
 }
 
@@ -203,37 +203,37 @@ AsyncClient& AsyncClient::operator=(AsyncClient&&) noexcept = default;
 
 std::string AsyncClient::uploadFile(const std::string& filePath)
 {
-    return impl_->uploadFile(filePath);
+    return _impl->uploadFile(filePath);
 }
 
 void AsyncClient::deleteFile(const std::string& fileId)
 {
-    impl_->deleteFile(fileId);
+    _impl->deleteFile(fileId);
 }
 
 std::string AsyncClient::createTranscription(const AsyncConfig& config)
 {
-    return impl_->createTranscription(config);
+    return _impl->createTranscription(config);
 }
 
 AsyncTranscription AsyncClient::getTranscription(const std::string& transcriptionId)
 {
-    return impl_->getTranscription(transcriptionId);
+    return _impl->getTranscription(transcriptionId);
 }
 
 std::vector<Token> AsyncClient::getTranscript(const std::string& transcriptionId)
 {
-    return impl_->getTranscript(transcriptionId);
+    return _impl->getTranscript(transcriptionId);
 }
 
 void AsyncClient::deleteTranscription(const std::string& transcriptionId)
 {
-    impl_->deleteTranscription(transcriptionId);
+    _impl->deleteTranscription(transcriptionId);
 }
 
 std::vector<Token> AsyncClient::transcribeFile(const std::string& filePath, AsyncConfig config, int pollIntervalMs)
 {
-    return impl_->transcribeFile(filePath, std::move(config), pollIntervalMs);
+    return _impl->transcribeFile(filePath, std::move(config), pollIntervalMs);
 }
 
 } // namespace soniox

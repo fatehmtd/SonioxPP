@@ -136,6 +136,20 @@ if(SONIOX_BUILD_EXAMPLES)
     if(NOT miniaudio_POPULATED)
         fetchcontent_populate(miniaudio)
     endif()
+
+    # cppcodec — header-only base64/hex codec, used by the tts_realtime example
+    fetchcontent_declare(
+        cppcodec
+        GIT_REPOSITORY https://github.com/tplgy/cppcodec.git
+        GIT_TAG        v0.2
+        GIT_SHALLOW    TRUE
+    )
+    fetchcontent_getproperties(cppcodec)
+    if(NOT cppcodec_POPULATED)
+        fetchcontent_populate(cppcodec)
+    endif()
+    add_library(cppcodec INTERFACE)
+    target_include_directories(cppcodec INTERFACE ${cppcodec_SOURCE_DIR})
 endif()
 
 # ---------------------------------------------------------------------------

@@ -165,12 +165,12 @@ SttRestClient::SttRestClient(
     std::string api_key,
     std::shared_ptr<transport::IHttpTransport> http_transport,
     std::string base_url)
-    : api_key_(std::move(api_key)),
-      base_url_(std::move(base_url)),
-      http_transport_(std::move(http_transport))
+    : _apiKey(std::move(api_key)),
+      _baseUrl(std::move(base_url)),
+      _httpTransport(std::move(http_transport))
 {
-    if (!http_transport_) {
-        http_transport_ = std::make_shared<transport::CurlHttpTransport>();
+    if (!_httpTransport) {
+        _httpTransport = std::make_shared<transport::CurlHttpTransport>();
     }
 }
 
@@ -182,8 +182,8 @@ transport::HttpRequest SttRestClient::makeJsonRequest(
     transport::HttpRequest request;
     request.method = method;
     request.url = buildUrl(path);
-    request.headers["Authorization"] = "Bearer " + api_key_;
-    request.headers["User-Agent"] = "sonioxpp/2.0";
+    request.headers["Authorization"] = "Bearer " + _apiKey;
+    request.headers["User-Agent"] = soniox::USER_AGENT;
     if (!json_body.empty()) {
         request.content_type = "application/json";
         request.body = json_body;
@@ -193,7 +193,7 @@ transport::HttpRequest SttRestClient::makeJsonRequest(
 
 std::string SttRestClient::buildUrl(const std::string& path) const
 {
-    return base_url_ + path;
+    return _baseUrl + path;
 }
 
 std::string SttRestClient::toStringBody(const std::vector<std::uint8_t>& body)
@@ -206,8 +206,8 @@ std::string SttRestClient::uploadFile(const std::string& file_path, const std::s
     transport::HttpRequest request;
     request.method = transport::HttpMethod::Post;
     request.url = buildUrl("/v1/files");
-    request.headers["Authorization"] = "Bearer " + api_key_;
-    request.headers["User-Agent"] = "sonioxpp/2.0";
+    request.headers["Authorization"] = "Bearer " + _apiKey;
+    request.headers["User-Agent"] = soniox::USER_AGENT;
     request.multipart_files.push_back({"file", file_path, ""});
 
     if (!client_reference_id.empty()) {
@@ -217,7 +217,7 @@ std::string SttRestClient::uploadFile(const std::string& file_path, const std::s
         request.body = body.dump();
     }
 
-    const auto response = http_transport_->send(request);
+    const auto response = _httpTransport->send(request);
     throwIfError(response, "upload file");
     return toStringBody(response.body);
 }
@@ -229,7 +229,7 @@ SttFile SttRestClient::uploadFileTyped(const std::string& file_path, const std::
 
 std::string SttRestClient::getFile(const std::string& file_id)
 {
-    const auto response = http_transport_->send(makeJsonRequest(transport::HttpMethod::Get, "/v1/files/" + file_id));
+    const auto response = _httpTransport->send(makeJsonRequest(transport::HttpMethod::Get, "/v1/files/" + file_id));
     throwIfError(response, "get file");
     return toStringBody(response.body);
 }
@@ -241,7 +241,7 @@ SttFile SttRestClient::getFileTyped(const std::string& file_id)
 
 std::string SttRestClient::getFileUrl(const std::string& file_id)
 {
-    const auto response = http_transport_->send(makeJsonRequest(transport::HttpMethod::Get, "/v1/files/" + file_id + "/url"));
+    const auto response = _httpTransport->send(makeJsonRequest(transport::HttpMethod::Get, "/v1/files/" + file_id + "/url"));
     throwIfError(response, "get file url");
     return toStringBody(response.body);
 }
@@ -256,7 +256,7 @@ SttFileUrl SttRestClient::getFileUrlTyped(const std::string& file_id)
 
 std::string SttRestClient::getFilesCount()
 {
-    const auto response = http_transport_->send(makeJsonRequest(transport::HttpMethod::Get, "/v1/files/count"));
+    const auto response = _httpTransport->send(makeJsonRequest(transport::HttpMethod::Get, "/v1/files/count"));
     throwIfError(response, "get files count");
     return toStringBody(response.body);
 }
@@ -268,13 +268,13 @@ SttFilesCount SttRestClient::getFilesCountTyped()
 
 void SttRestClient::deleteFile(const std::string& file_id)
 {
-    const auto response = http_transport_->send(makeJsonRequest(transport::HttpMethod::Delete, "/v1/files/" + file_id));
+    const auto response = _httpTransport->send(makeJsonRequest(transport::HttpMethod::Delete, "/v1/files/" + file_id));
     throwIfError(response, "delete file");
 }
 
 std::string SttRestClient::listFiles(const PaginationQuery& query)
 {
-    const auto response = http_transport_->send(makeJsonRequest(
+    const auto response = _httpTransport->send(makeJsonRequest(
         transport::HttpMethod::Get,
         "/v1/files" + makeQueryString(query)));
     throwIfError(response, "list files");
@@ -334,7 +334,7 @@ std::string SttRestClient::createTranscription(const SttCreateTranscriptionReque
         body["client_reference_id"] = request.client_reference_id;
     }
 
-    const auto response = http_transport_->send(
+    const auto response = _httpTransport->send(
         makeJsonRequest(transport::HttpMethod::Post, "/v1/transcriptions", body.dump()));
     throwIfError(response, "create transcription");
     return toStringBody(response.body);
@@ -347,7 +347,7 @@ SttTranscription SttRestClient::createTranscriptionTyped(const SttCreateTranscri
 
 std::string SttRestClient::getTranscription(const std::string& transcription_id)
 {
-    const auto response = http_transport_->send(
+    const auto response = _httpTransport->send(
         makeJsonRequest(transport::HttpMethod::Get, "/v1/transcriptions/" + transcription_id));
     throwIfError(response, "get transcription");
     return toStringBody(response.body);
@@ -360,7 +360,7 @@ SttTranscription SttRestClient::getTranscriptionTyped(const std::string& transcr
 
 std::string SttRestClient::getTranscriptionTranscript(const std::string& transcription_id)
 {
-    const auto response = http_transport_->send(
+    const auto response = _httpTransport->send(
         makeJsonRequest(transport::HttpMethod::Get, "/v1/transcriptions/" + transcription_id + "/transcript"));
     throwIfError(response, "get transcription transcript");
     return toStringBody(response.body);
@@ -373,7 +373,7 @@ SttTranscript SttRestClient::getTranscriptionTranscriptTyped(const std::string& 
 
 std::string SttRestClient::getTranscriptionsCount()
 {
-    const auto response = http_transport_->send(
+    const auto response = _httpTransport->send(
         makeJsonRequest(transport::HttpMethod::Get, "/v1/transcriptions/count"));
     throwIfError(response, "get transcriptions count");
     return toStringBody(response.body);
@@ -386,14 +386,14 @@ SttTranscriptionsCount SttRestClient::getTranscriptionsCountTyped()
 
 void SttRestClient::deleteTranscription(const std::string& transcription_id)
 {
-    const auto response = http_transport_->send(
+    const auto response = _httpTransport->send(
         makeJsonRequest(transport::HttpMethod::Delete, "/v1/transcriptions/" + transcription_id));
     throwIfError(response, "delete transcription");
 }
 
 std::string SttRestClient::listTranscriptions(const PaginationQuery& query)
 {
-    const auto response = http_transport_->send(makeJsonRequest(
+    const auto response = _httpTransport->send(makeJsonRequest(
         transport::HttpMethod::Get,
         "/v1/transcriptions" + makeQueryString(query)));
     throwIfError(response, "list transcriptions");
@@ -417,7 +417,7 @@ SttListTranscriptionsTypedResult SttRestClient::listTranscriptionsTyped(const Pa
 
 std::string SttRestClient::getModels()
 {
-    const auto response = http_transport_->send(makeJsonRequest(transport::HttpMethod::Get, "/v1/models"));
+    const auto response = _httpTransport->send(makeJsonRequest(transport::HttpMethod::Get, "/v1/models"));
     throwIfError(response, "get STT models");
     return toStringBody(response.body);
 }
@@ -425,49 +425,49 @@ std::string SttRestClient::getModels()
 SttRealtimeClient::SttRealtimeClient(
     std::shared_ptr<transport::IWebSocketTransport> ws_transport,
     std::string endpoint)
-    : endpoint_(std::move(endpoint)),
-      ws_transport_(std::move(ws_transport))
+    : _endpoint(std::move(endpoint)),
+      _wsTransport(std::move(ws_transport))
 {
-    if (!ws_transport_) {
+    if (!_wsTransport) {
 #ifdef _WIN32
-        ws_transport_ = std::make_shared<transport::WinHttpWebSocketTransport>();
+        _wsTransport = std::make_shared<transport::WinHttpWebSocketTransport>();
 #else
-        ws_transport_ = std::make_shared<transport::LwsWebSocketTransport>();
+        _wsTransport = std::make_shared<transport::LwsWebSocketTransport>();
 #endif
     }
 
-    ws_transport_->setOnTextMessage([this](const std::string& message) {
-        if (on_message_) {
-            on_message_(message);
+    _wsTransport->setOnTextMessage([this](const std::string& message) {
+        if (_onMessage) {
+            _onMessage(message);
         }
     });
 
-    ws_transport_->setOnError([this](const std::string& error) {
-        if (on_error_) {
-            on_error_(error);
+    _wsTransport->setOnError([this](const std::string& error) {
+        if (_onError) {
+            _onError(error);
         }
     });
 
-    ws_transport_->setOnClose([this] {
-        if (on_closed_) {
-            on_closed_();
+    _wsTransport->setOnClose([this] {
+        if (_onClosed) {
+            _onClosed();
         }
     });
 }
 
 void SttRealtimeClient::setOnMessage(MessageCallback callback)
 {
-    on_message_ = std::move(callback);
+    _onMessage = std::move(callback);
 }
 
 void SttRealtimeClient::setOnError(ErrorCallback callback)
 {
-    on_error_ = std::move(callback);
+    _onError = std::move(callback);
 }
 
 void SttRealtimeClient::setOnClosed(ClosedCallback callback)
 {
-    on_closed_ = std::move(callback);
+    _onClosed = std::move(callback);
 }
 
 std::string SttRealtimeClient::buildConfigJson(const SttRealtimeConfig& config) const
@@ -512,36 +512,36 @@ std::string SttRealtimeClient::buildConfigJson(const SttRealtimeConfig& config) 
 void SttRealtimeClient::connect(const SttRealtimeConfig& config)
 {
     transport::WebSocketConnectOptions options;
-    options.url = endpoint_;
-    options.headers["User-Agent"] = "sonioxpp/2.0";
+    options.url = _endpoint;
+    options.headers["User-Agent"] = soniox::USER_AGENT;
 
-    ws_transport_->connect(options);
-    ws_transport_->sendText(buildConfigJson(config));
+    _wsTransport->connect(options);
+    _wsTransport->sendText(buildConfigJson(config));
 }
 
 void SttRealtimeClient::sendAudio(const std::vector<std::uint8_t>& chunk)
 {
-    ws_transport_->sendBinary(chunk);
+    _wsTransport->sendBinary(chunk);
 }
 
 void SttRealtimeClient::sendEndOfAudio()
 {
-    ws_transport_->sendBinary({});
+    _wsTransport->sendBinary({});
 }
 
 void SttRealtimeClient::sendManualFinalize()
 {
-    ws_transport_->sendText("{\"type\":\"finalize\"}");
+    _wsTransport->sendText("{\"type\":\"finalize\"}");
 }
 
 void SttRealtimeClient::sendKeepalive()
 {
-    ws_transport_->sendText("{\"type\":\"keepalive\"}");
+    _wsTransport->sendText("{\"type\":\"keepalive\"}");
 }
 
 void SttRealtimeClient::close()
 {
-    ws_transport_->close();
+    _wsTransport->close();
 }
 
 } // namespace soniox

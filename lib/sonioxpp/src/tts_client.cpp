@@ -103,13 +103,13 @@ TtsRestClient::TtsRestClient(
     std::shared_ptr<transport::IHttpTransport> http_transport,
     std::string api_base_url,
     std::string tts_base_url)
-    : api_key_(std::move(api_key)),
-      api_base_url_(std::move(api_base_url)),
-      tts_base_url_(std::move(tts_base_url)),
-      http_transport_(std::move(http_transport))
+    : _apiKey(std::move(api_key)),
+      _apiBaseUrl(std::move(api_base_url)),
+      _ttsBaseUrl(std::move(tts_base_url)),
+      _httpTransport(std::move(http_transport))
 {
-    if (!http_transport_) {
-        http_transport_ = std::make_shared<transport::CurlHttpTransport>();
+    if (!_httpTransport) {
+        _httpTransport = std::make_shared<transport::CurlHttpTransport>();
     }
 }
 
@@ -131,16 +131,16 @@ transport::HttpResponse TtsRestClient::generateSpeech(const TtsGenerateRequest& 
 
     transport::HttpRequest http_request;
     http_request.method = transport::HttpMethod::Post;
-    http_request.url = tts_base_url_ + "/tts";
+    http_request.url = _ttsBaseUrl + "/tts";
     http_request.content_type = "application/json";
     http_request.body = body.dump();
-    http_request.headers["Authorization"] = "Bearer " + api_key_;
-    http_request.headers["User-Agent"] = "sonioxpp/2.0";
+    http_request.headers["Authorization"] = "Bearer " + _apiKey;
+    http_request.headers["User-Agent"] = soniox::USER_AGENT;
     if (!request.request_id.empty()) {
         http_request.headers["X-Request-Id"] = request.request_id;
     }
 
-    auto response = http_transport_->send(http_request);
+    auto response = _httpTransport->send(http_request);
     throwIfError(response, "generate TTS");
     return response;
 }
@@ -149,11 +149,11 @@ std::string TtsRestClient::getModels()
 {
     transport::HttpRequest request;
     request.method = transport::HttpMethod::Get;
-    request.url = api_base_url_ + "/v1/tts-models";
-    request.headers["Authorization"] = "Bearer " + api_key_;
-    request.headers["User-Agent"] = "sonioxpp/2.0";
+    request.url = _apiBaseUrl + "/v1/tts-models";
+    request.headers["Authorization"] = "Bearer " + _apiKey;
+    request.headers["User-Agent"] = soniox::USER_AGENT;
 
-    const auto response = http_transport_->send(request);
+    const auto response = _httpTransport->send(request);
     throwIfError(response, "get TTS models");
 
     return std::string(response.body.begin(), response.body.end());
@@ -167,66 +167,66 @@ TtsModelsResponse TtsRestClient::getModelsTyped()
 TtsRealtimeClient::TtsRealtimeClient(
     std::shared_ptr<transport::IWebSocketTransport> ws_transport,
     std::string endpoint)
-    : endpoint_(std::move(endpoint)),
-      ws_transport_(std::move(ws_transport))
+    : _endpoint(std::move(endpoint)),
+      _wsTransport(std::move(ws_transport))
 {
-    if (!ws_transport_) {
+    if (!_wsTransport) {
 #ifdef _WIN32
-        ws_transport_ = std::make_shared<transport::WinHttpWebSocketTransport>();
+        _wsTransport = std::make_shared<transport::WinHttpWebSocketTransport>();
 #else
-        ws_transport_ = std::make_shared<transport::LwsWebSocketTransport>();
+        _wsTransport = std::make_shared<transport::LwsWebSocketTransport>();
 #endif
     }
 
-    ws_transport_->setOnTextMessage([this](const std::string& message) {
-        if (on_message_) {
-            on_message_(message);
+    _wsTransport->setOnTextMessage([this](const std::string& message) {
+        if (_onMessage) {
+            _onMessage(message);
         }
 
-        if (on_parsed_message_) {
-            on_parsed_message_(parseMessage(message));
-        }
-    });
-
-    ws_transport_->setOnError([this](const std::string& message) {
-        if (on_error_) {
-            on_error_(message);
+        if (_onParsedMessage) {
+            _onParsedMessage(parseMessage(message));
         }
     });
 
-    ws_transport_->setOnClose([this] {
-        if (on_closed_) {
-            on_closed_();
+    _wsTransport->setOnError([this](const std::string& message) {
+        if (_onError) {
+            _onError(message);
+        }
+    });
+
+    _wsTransport->setOnClose([this] {
+        if (_onClosed) {
+            _onClosed();
         }
     });
 }
 
 void TtsRealtimeClient::setOnMessage(TextMessageCallback callback)
 {
-    on_message_ = std::move(callback);
+    _onMessage = std::move(callback);
 }
 
 void TtsRealtimeClient::setOnParsedMessage(ParsedMessageCallback callback)
 {
-    on_parsed_message_ = std::move(callback);
+    _onParsedMessage = std::move(callback);
 }
 
 void TtsRealtimeClient::setOnError(ErrorCallback callback)
 {
-    on_error_ = std::move(callback);
+    _onError = std::move(callback);
 }
 
 void TtsRealtimeClient::setOnClosed(ClosedCallback callback)
 {
-    on_closed_ = std::move(callback);
+    _onClosed = std::move(callback);
 }
 
 void TtsRealtimeClient::connect()
 {
     transport::WebSocketConnectOptions options;
-    options.url = endpoint_;
-    options.headers["User-Agent"] = "sonioxpp/2.0";
-    ws_transport_->connect(options);
+    options.url = _endpoint;
+    options.headers["User-Agent"] = soniox::USER_AGENT;
+    _wsTransport->connect(options);
 }
 
 void TtsRealtimeClient::startStream(const TtsRealtimeStreamConfig& config)
@@ -246,7 +246,7 @@ void TtsRealtimeClient::startStream(const TtsRealtimeStreamConfig& config)
         payload["bitrate"] = config.bitrate;
     }
 
-    ws_transport_->sendText(payload.dump());
+    _wsTransport->sendText(payload.dump());
 }
 
 void TtsRealtimeClient::sendText(const std::string& stream_id, const std::string& text, bool text_end)
@@ -255,7 +255,7 @@ void TtsRealtimeClient::sendText(const std::string& stream_id, const std::string
     payload["stream_id"] = stream_id;
     payload["text"] = text;
     payload["text_end"] = text_end;
-    ws_transport_->sendText(payload.dump());
+    _wsTransport->sendText(payload.dump());
 }
 
 void TtsRealtimeClient::cancelStream(const std::string& stream_id)
@@ -263,17 +263,19 @@ void TtsRealtimeClient::cancelStream(const std::string& stream_id)
     json payload;
     payload["stream_id"] = stream_id;
     payload["cancel"] = true;
-    ws_transport_->sendText(payload.dump());
+    _wsTransport->sendText(payload.dump());
 }
 
 void TtsRealtimeClient::sendKeepalive()
 {
-    ws_transport_->sendText("{\"type\":\"keepalive\"}");
+    json payload;
+    payload["keep_alive"] = true;
+    _wsTransport->sendText(payload.dump());
 }
 
 void TtsRealtimeClient::close()
 {
-    ws_transport_->close();
+    _wsTransport->close();
 }
 
 TtsRealtimeMessage TtsRealtimeClient::parseMessage(const std::string& message) const

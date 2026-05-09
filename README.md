@@ -286,30 +286,32 @@ namespace soniox::auth::temporary_api_key_usage  // transcribe_websocket, tts_rt
 ### `soniox::RealtimeConfig`
 
 | Field | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `api_key` | `string` | — | **Required** |
 | `model` | `string` | `stt-rt-v4` | Model ID |
-| `audio_format` | `string` | `auto` | Format hint |
-| `sample_rate` | `int` | `0` | Hz — required when `audio_format` is `pcm_s16le` |
-| `num_channels` | `int` | `0` | Channels — required when `audio_format` is `pcm_s16le` |
-| `language_hints` | `vector<string>` | `{}` | BCP-47 codes |
+| `audio_format` | `string` | `auto` | Format hint — `auto`, `pcm_s16le`, `wav`, `mp3`, etc. |
+| `sample_rate` | `int` | `0` | Hz — required when `audio_format` is a raw PCM format |
+| `num_channels` | `int` | `0` | Channels — required when `audio_format` is a raw PCM format |
+| `language_hints` | `vector<string>` | `{}` | BCP-47 codes (up to 100) |
+| `language_hints_strict` | `bool` | `false` | Disable fallback to other languages |
 | `enable_language_identification` | `bool` | `false` | Tag each token with a language |
 | `enable_speaker_diarization` | `bool` | `false` | Assign speaker IDs |
-| `enable_endpoint_detection` | `bool` | `false` | Detect speech pauses |
+| `enable_endpoint_detection` | `bool` | `false` | Detect speech pauses (emits `<end>` token) |
+| `max_endpoint_delay_ms` | `int` | `0` | Endpointing delay 500–3000 ms; 0 = server default (2000) |
 | `context` | `Context` | | Domain hints and custom vocabulary |
 | `translation` | `Translation` | | Translation settings |
 
 ### `soniox::RealtimeClient`
 
 | Method | Description |
-|---|---|
+| --- | --- |
 | `setOnTokens(cb)` | Token batch callback — `(tokens, has_final)` |
 | `setOnFinished(cb)` | Called once when server signals `finished: true` |
 | `setOnError(cb)` | Network or protocol error |
 | `connect(config)` | Handshake and send initial config |
 | `sendAudio(data, size)` | Raw audio bytes |
 | `sendAudio(vector)` | Vector overload |
-| `sendEndOfAudio()` | Signal end-of-stream |
+| `sendEndOfAudio()` | Signal end-of-stream (empty binary frame) |
 | `run()` | Block until session ends |
 | `close()` | Force-close the connection |
 
@@ -318,21 +320,22 @@ namespace soniox::auth::temporary_api_key_usage  // transcribe_websocket, tts_rt
 ### `soniox::AsyncConfig`
 
 | Field | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `api_key` | `string` | — | **Required** |
 | `model` | `string` | `stt-async-v4` | Model ID |
 | `language_hints` | `vector<string>` | `{}` | BCP-47 codes |
+| `language_hints_strict` | `bool` | `false` | Restrict to hinted languages only |
 | `enable_language_identification` | `bool` | `false` | |
 | `enable_speaker_diarization` | `bool` | `false` | |
 | `context` | `Context` | | Domain hints and custom vocabulary |
 | `translation` | `Translation` | | |
-| `audio_url` | `string` | | Public URL (alternative to upload) |
-| `file_id` | `string` | | Set by `transcribeFile()` or manually |
+| `audio_url` | `string` | | Public HTTPS URL (alternative to upload) |
+| `file_id` | `string` | | File ID returned by `AsyncClient::uploadFile()` |
 
 ### `soniox::AsyncClient`
 
 | Method | Description |
-|---|---|
+| --- | --- |
 | `uploadFile(path)` | Upload local audio; returns file ID |
 | `deleteFile(id)` | Delete an uploaded file |
 | `createTranscription(cfg)` | Start a job; returns job ID |
@@ -348,7 +351,7 @@ namespace soniox::auth::temporary_api_key_usage  // transcribe_websocket, tts_rt
 Full typed wrappers around the Soniox STT REST API. Each operation has a raw-JSON overload (returns `std::string`) and a `Typed` overload (returns a struct).
 
 | Method | Returns |
-|---|---|
+| --- | --- |
 | `uploadFileTyped(path)` | `SttFile` |
 | `getFileTyped(id)` | `SttFile` |
 | `getFileUrlTyped(id)` | `SttFileUrl` |
@@ -365,7 +368,21 @@ Full typed wrappers around the Soniox STT REST API. Each operation has a raw-JSO
 
 ### `soniox::SttCreateTranscriptionRequest`
 
-Key fields: `model`, `file_id`, `audio_url`, `language_hints`, `language_hints_strict`, `enable_speaker_diarization`, `enable_language_identification`, `webhook_url`, `client_reference_id`.
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `model` | `string` | `stt-async-v4` | Model ID |
+| `file_id` | `string` | | Source file UUID — set one of `file_id` or `audio_url` |
+| `audio_url` | `string` | | Public HTTPS URL to audio — set one of `file_id` or `audio_url` |
+| `language_hints` | `vector<string>` | `{}` | BCP-47 codes (up to 100) |
+| `language_hints_strict` | `bool` | `false` | Restrict to hinted languages only |
+| `enable_speaker_diarization` | `bool` | `false` | |
+| `enable_language_identification` | `bool` | `false` | |
+| `context_json` | `string` | | Serialised context JSON |
+| `translation_json` | `string` | | Serialised translation JSON |
+| `webhook_url` | `string` | | HTTPS URL for completion callback (max 256 chars) |
+| `webhook_auth_header_name` | `string` | | Auth header name for webhook delivery |
+| `webhook_auth_header_value` | `string` | | Auth header value (masked in API responses) |
+| `client_reference_id` | `string` | | Opaque tracking tag (max 256 chars) |
 
 ---
 
@@ -374,15 +391,15 @@ Key fields: `model`, `file_id`, `audio_url`, `language_hints`, `language_hints_s
 Low-level typed WebSocket client. Delivers raw JSON message strings; parsing is up to the caller.
 
 | Method | Description |
-|---|---|
+| --- | --- |
 | `setOnMessage(cb)` | Raw JSON message callback |
 | `setOnError(cb)` | Error callback |
 | `setOnClosed(cb)` | Connection closed callback |
 | `connect(config)` | Connect and send initial config |
 | `sendAudio(chunk)` | Send audio chunk |
 | `sendEndOfAudio()` | Signal end-of-stream |
-| `sendManualFinalize()` | Request immediate finalization |
-| `sendKeepalive()` | Send keepalive frame |
+| `sendManualFinalize()` | Request immediate finalization (`{"type":"finalize"}`) |
+| `sendKeepalive()` | Send keepalive (`{"type":"keepalive"}`) |
 | `close()` | Close the connection |
 
 ---
@@ -390,28 +407,30 @@ Low-level typed WebSocket client. Delivers raw JSON message strings; parsing is 
 ### `soniox::TtsRestClient`
 
 | Method | Returns |
-|---|---|
+| --- | --- |
 | `generateSpeech(req)` | `HttpResponse` — `body` contains raw audio bytes |
 | `getModelsTyped()` | `TtsModelsResponse` |
 
 ### `soniox::TtsGenerateRequest`
 
 | Field | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `model` | `tts-rt-v1` | Model ID |
-| `language` | | BCP-47 code |
-| `voice` | | Voice ID (e.g. `"Adrian"`) |
-| `audio_format` | | `wav`, `mp3`, `opus`, `flac`, `pcm_s16le`, `pcm_s16be` |
-| `text` | | Text to synthesize |
-| `sample_rate` | `0` | Override output sample rate |
-| `bitrate` | `0` | Override output bitrate |
+| `language` | | BCP-47 code (required, e.g. `"en"`) |
+| `voice` | | Voice ID (required, e.g. `"Adrian"`) |
+| `audio_format` | | `wav`, `mp3`, `opus`, `flac`, `pcm_s16le`, `pcm_s16be` (required) |
+| `text` | | Text to synthesise (max 5 000 chars) |
+| `sample_rate` | `0` | Output sample rate Hz; 0 = format default (typically 24 000 Hz) |
+| `bitrate` | `0` | Output bitrate bps for lossy formats; 0 = format default |
+
+**Available voices:** `Maya`, `Daniel`, `Noah`, `Nina`, `Emma`, `Jack`, `Adrian`, `Claire`, `Grace`, `Owen`, `Mina`, `Kenji`
 
 ---
 
 ### `soniox::TtsRealtimeClient`
 
 | Method | Description |
-|---|---|
+| --- | --- |
 | `setOnParsedMessage(cb)` | Parsed `TtsRealtimeMessage` callback |
 | `setOnMessage(cb)` | Raw JSON message callback |
 | `setOnError(cb)` | Error callback |
@@ -420,18 +439,31 @@ Low-level typed WebSocket client. Delivers raw JSON message strings; parsing is 
 | `startStream(config)` | Send stream config with API key |
 | `sendText(stream_id, text, text_end)` | Push text chunk; `text_end=true` signals end |
 | `cancelStream(stream_id)` | Abort the stream |
-| `sendKeepalive()` | Send keepalive frame |
+| `sendKeepalive()` | Send connection-level keepalive (`{"keep_alive":true}`) |
 | `close()` | Close the connection |
 
 ### `soniox::TtsRealtimeMessage`
 
 | Field | Description |
-|---|---|
+| --- | --- |
 | `stream_id` | Stream this message belongs to |
-| `audio` | Base64-encoded audio chunk |
-| `terminated` | `true` when the stream is complete |
-| `error_code` | Non-zero on error |
+| `audio` | Base64-encoded audio chunk; empty for non-audio messages |
+| `terminated` | `true` when the stream is complete; `stream_id` may then be reused |
+| `error_code` | Non-zero on stream error (connection stays open) |
 | `error_message` | Error description |
+
+### `soniox::TtsRealtimeStreamConfig`
+
+| Field | Default | Description |
+| --- | --- | --- |
+| `api_key` | | Soniox API key or temporary key (required) |
+| `stream_id` | | Unique per active stream; reusable after `terminated` (required) |
+| `model` | `tts-rt-v1` | Model ID |
+| `language` | | BCP-47 code (required) |
+| `voice` | | Voice ID (required) |
+| `audio_format` | | Output format (required) |
+| `sample_rate` | `0` | Hz; 0 = format default |
+| `bitrate` | `0` | bps for lossy formats; 0 = format default |
 
 ---
 
@@ -443,27 +475,27 @@ Low-level typed WebSocket client. Delivers raw JSON message strings; parsing is 
 
 ### `soniox::TemporaryApiKeyRequest`
 
-| Field | Description |
-|---|---|
-| `usage_type` | `"transcribe_websocket"` or `"tts_rt"` |
-| `expires_in_seconds` | Key TTL |
-| `single_use` | Invalidate after first use |
-| `max_session_duration_seconds` | Cap session length |
-| `client_reference_id` | Opaque tag for your records |
+| Field | Type | Description |
+| --- | --- | --- |
+| `usage_type` | `string` | `"transcribe_websocket"` or `"tts_rt"` |
+| `expires_in_seconds` | `int` | Key TTL (max 3 600) |
+| `single_use` | `bool` | Invalidate after first use |
+| `max_session_duration_seconds` | `int` | Cap session length; 0 = no extra cap |
+| `client_reference_id` | `string` | Opaque tracking tag (max 256 chars) |
 
 ---
 
 ### `soniox::Token`
 
 | Field | Type | Description |
-|---|---|---|
-| `text` | `string` | Token text |
-| `is_final` | `bool` | Will not be revised |
-| `speaker` | `int` | Speaker ID (diarization) |
-| `language` | `string` | BCP-47 detected language |
-| `translation_status` | `string` | e.g. `"translated"` |
-| `start_ms` | `int` | Start time in ms (async only) |
-| `duration_ms` | `int` | Duration in ms (async only) |
+| --- | --- | --- |
+| `text` | `string` | Token text; `"<fin>"` after `sendManualFinalize`, `"<end>"` at endpoints |
+| `is_final` | `bool` | Will not be revised when `true` |
+| `speaker` | `int` | Speaker ID (0-based); populated with diarization |
+| `language` | `string` | BCP-47 detected language; populated with lang-ID |
+| `translation_status` | `string` | `"original"`, `"translation"`, or `"none"` |
+| `start_ms` | `int` | Start time in ms (async API only) |
+| `duration_ms` | `int` | Duration in ms (async API only) |
 
 ### `soniox::SonioxApiException`
 
@@ -471,11 +503,11 @@ Thrown on HTTP ≥ 400 REST responses.
 
 ```cpp
 catch (const soniox::SonioxApiException& ex) {
-    ex.detail().status_code;      // int
-    ex.detail().error_type;       // string
-    ex.detail().message;          // string
-    ex.detail().request_id;       // string
-    ex.detail().validation_errors; // vector<ApiValidationError>
+    ex.detail().status_code;       // int  (e.g. 400, 401, 402, 404, 409, 429, 500)
+    ex.detail().error_type;        // string (e.g. "invalid_request", "unauthenticated")
+    ex.detail().message;           // string
+    ex.detail().request_id;        // string (for support tracing)
+    ex.detail().validation_errors; // vector<ApiValidationError> — present on 400
 }
 ```
 
@@ -488,7 +520,7 @@ The library abstracts I/O behind two interfaces:
 | Interface | Default implementation | Platform |
 | --- | --- | --- |
 | `IHttpTransport` | `CurlHttpTransport` (libcurl) | All |
-| `IWebSocketTransport` | `WinHttpWebSocketTransport` | Windows |
+| `IWebSocketTransport` | `WinHttpWebSocketTransport` (WinHTTP) | Windows |
 | `IWebSocketTransport` | `LwsWebSocketTransport` (libwebsockets) | Linux / macOS |
 
 Pass a custom transport to any client constructor to swap backends:
@@ -498,7 +530,7 @@ auto my_http = std::make_shared<MyHttpTransport>();
 soniox::SttRestClient stt("key", my_http);
 ```
 
-See [docs/transport.md](docs/transport.md) for the interface contract.
+See [docs/transport.md](docs/transport.md) for the full interface contract.
 
 ---
 
