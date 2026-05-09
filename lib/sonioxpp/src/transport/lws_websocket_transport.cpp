@@ -2,6 +2,7 @@
 
 #include <libwebsockets.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <cstring>
 #include <map>
@@ -63,9 +64,7 @@ ParsedWsUrl parseWsUrl(const std::string& url)
 // Impl
 // ---------------------------------------------------------------------------
 
-struct LwsWebSocketTransport::Impl {
-    LwsWebSocketTransport* owner{nullptr};
-
+struct LwsWebSocketTransportImpl {
     // connection parameters (written before service thread starts)
     std::string address;
     int         port{0};
@@ -102,6 +101,15 @@ struct LwsWebSocketTransport::Impl {
     // fragment reassembly
     std::vector<uint8_t> frag_buf;
     bool frag_is_binary{false};
+
+    // callbacks and open state (accessed from the lws callback thread)
+    mutable std::mutex                        callback_mutex;
+    IWebSocketTransport::OpenHandler          on_open;
+    IWebSocketTransport::TextMessageHandler   on_text;
+    IWebSocketTransport::BinaryMessageHandler on_binary;
+    IWebSocketTransport::ErrorHandler         on_error;
+    IWebSocketTransport::CloseHandler         on_close;
+    std::atomic<bool>                         is_open{false};
 };
 
 // ---------------------------------------------------------------------------
@@ -123,7 +131,7 @@ static const lws_protocols kProtocols[] = {
 static int lwsCallback(lws* wsi, lws_callback_reasons reason,
                        void* /*user*/, void* in, size_t len)
 {
-    auto* impl = static_cast<LwsWebSocketTransport::Impl*>(
+    auto* impl = static_cast<LwsWebSocketTransportImpl*>(
                      lws_context_user(lws_get_context(wsi)));
     if (!impl) return 0;
 
@@ -195,15 +203,15 @@ static int lwsCallback(lws* wsi, lws_callback_reasons reason,
             if (impl->frag_is_binary) {
                 IWebSocketTransport::BinaryMessageHandler cb;
                 {
-                    std::lock_guard<std::mutex> g(impl->owner->callback_mutex_);
-                    cb = impl->owner->on_binary_;
+                    std::lock_guard<std::mutex> g(impl->callback_mutex);
+                    cb = impl->on_binary;
                 }
                 if (cb) cb(impl->frag_buf);
             } else {
                 IWebSocketTransport::TextMessageHandler cb;
                 {
-                    std::lock_guard<std::mutex> g(impl->owner->callback_mutex_);
-                    cb = impl->owner->on_text_;
+                    std::lock_guard<std::mutex> g(impl->callback_mutex);
+                    cb = impl->on_text;
                 }
                 if (cb) cb(std::string(impl->frag_buf.begin(), impl->frag_buf.end()));
             }
@@ -258,11 +266,11 @@ static int lwsCallback(lws* wsi, lws_callback_reasons reason,
         impl->wsi = nullptr;
         impl->stopping.store(true);
 
-        if (impl->owner->is_open_.exchange(false)) {
+        if (impl->is_open.exchange(false)) {
             IWebSocketTransport::CloseHandler cb;
             {
-                std::lock_guard<std::mutex> g(impl->owner->callback_mutex_);
-                cb = impl->owner->on_close_;
+                std::lock_guard<std::mutex> g(impl->callback_mutex);
+                cb = impl->on_close;
             }
             if (cb) cb();
         }
@@ -280,14 +288,13 @@ static int lwsCallback(lws* wsi, lws_callback_reasons reason,
 // ---------------------------------------------------------------------------
 
 LwsWebSocketTransport::LwsWebSocketTransport()
-    : impl_(std::make_unique<Impl>())
+    : impl_(std::make_unique<LwsWebSocketTransportImpl>())
 {
-    impl_->owner = this;
 }
 
 LwsWebSocketTransport::~LwsWebSocketTransport()
 {
-    if (is_open_.load()) {
+    if (impl_->is_open.load()) {
         impl_->closing.store(true);
         if (impl_->ctx) lws_cancel_service(impl_->ctx);
     }
@@ -308,16 +315,16 @@ LwsWebSocketTransport::~LwsWebSocketTransport()
 // ---------------------------------------------------------------------------
 
 void LwsWebSocketTransport::setOnOpen(OpenHandler h)
-    { std::lock_guard<std::mutex> g(callback_mutex_); on_open_   = std::move(h); }
+    { std::lock_guard<std::mutex> g(impl_->callback_mutex); impl_->on_open   = std::move(h); }
 void LwsWebSocketTransport::setOnTextMessage(TextMessageHandler h)
-    { std::lock_guard<std::mutex> g(callback_mutex_); on_text_   = std::move(h); }
+    { std::lock_guard<std::mutex> g(impl_->callback_mutex); impl_->on_text   = std::move(h); }
 void LwsWebSocketTransport::setOnBinaryMessage(BinaryMessageHandler h)
-    { std::lock_guard<std::mutex> g(callback_mutex_); on_binary_ = std::move(h); }
+    { std::lock_guard<std::mutex> g(impl_->callback_mutex); impl_->on_binary = std::move(h); }
 void LwsWebSocketTransport::setOnError(ErrorHandler h)
-    { std::lock_guard<std::mutex> g(callback_mutex_); on_error_  = std::move(h); }
+    { std::lock_guard<std::mutex> g(impl_->callback_mutex); impl_->on_error  = std::move(h); }
 void LwsWebSocketTransport::setOnClose(CloseHandler h)
-    { std::lock_guard<std::mutex> g(callback_mutex_); on_close_  = std::move(h); }
-bool LwsWebSocketTransport::isOpen() const { return is_open_.load(); }
+    { std::lock_guard<std::mutex> g(impl_->callback_mutex); impl_->on_close  = std::move(h); }
+bool LwsWebSocketTransport::isOpen() const { return impl_->is_open.load(); }
 
 // ---------------------------------------------------------------------------
 // connect()
@@ -384,10 +391,10 @@ void LwsWebSocketTransport::connect(const WebSocketConnectOptions& options)
                                  + impl_->connect_error);
     }
 
-    is_open_.store(true);
+    impl_->is_open.store(true);
 
-    OpenHandler cb;
-    { std::lock_guard<std::mutex> g(callback_mutex_); cb = on_open_; }
+    IWebSocketTransport::OpenHandler cb;
+    { std::lock_guard<std::mutex> g(impl_->callback_mutex); cb = impl_->on_open; }
     if (cb) cb();
 }
 
@@ -397,11 +404,11 @@ void LwsWebSocketTransport::connect(const WebSocketConnectOptions& options)
 
 void LwsWebSocketTransport::sendText(const std::string& message)
 {
-    if (!is_open_.load()) {
+    if (!impl_->is_open.load()) {
         throw std::runtime_error("[sonioxpp] WebSocket is not open");
     }
 
-    Impl::OutboundMsg msg;
+    LwsWebSocketTransportImpl::OutboundMsg msg;
     msg.is_binary = false;
     msg.data.resize(LWS_PRE + message.size());
     std::memcpy(msg.data.data() + LWS_PRE, message.data(), message.size());
@@ -412,11 +419,11 @@ void LwsWebSocketTransport::sendText(const std::string& message)
 
 void LwsWebSocketTransport::sendBinary(const std::vector<std::uint8_t>& payload)
 {
-    if (!is_open_.load()) {
+    if (!impl_->is_open.load()) {
         throw std::runtime_error("[sonioxpp] WebSocket is not open");
     }
 
-    Impl::OutboundMsg msg;
+    LwsWebSocketTransportImpl::OutboundMsg msg;
     msg.is_binary = true;
     msg.data.resize(LWS_PRE + payload.size());
     if (!payload.empty()) {
@@ -433,7 +440,7 @@ void LwsWebSocketTransport::sendBinary(const std::vector<std::uint8_t>& payload)
 
 void LwsWebSocketTransport::close()
 {
-    if (!is_open_.exchange(false)) return;
+    if (!impl_->is_open.exchange(false)) return;
 
     impl_->closing.store(true);
     lws_cancel_service(impl_->ctx);

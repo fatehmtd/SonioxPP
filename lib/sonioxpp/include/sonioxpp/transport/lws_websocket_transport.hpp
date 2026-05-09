@@ -2,11 +2,11 @@
 
 #include "websocket_transport.hpp"
 
-#include <atomic>
 #include <memory>
-#include <mutex>
 
 namespace soniox::transport {
+
+struct LwsWebSocketTransportImpl;
 
 class LwsWebSocketTransport final : public IWebSocketTransport {
 public:
@@ -26,17 +26,7 @@ public:
     bool isOpen() const override;
 
 private:
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
-
-    mutable std::mutex   callback_mutex_;
-    OpenHandler          on_open_;
-    TextMessageHandler   on_text_;
-    BinaryMessageHandler on_binary_;
-    ErrorHandler         on_error_;
-    CloseHandler         on_close_;
-
-    std::atomic<bool> is_open_{false};
+    std::unique_ptr<LwsWebSocketTransportImpl> impl_;
 };
 
 } // namespace soniox::transport

@@ -12,6 +12,22 @@ if(POLICY CMP0169)
 endif()
 
 # ---------------------------------------------------------------------------
+# On Apple Silicon, Homebrew installs to /opt/homebrew which is not a default
+# linker search path. Add it so pkg-config-discovered deps (e.g. libidn2) link.
+# ---------------------------------------------------------------------------
+if(APPLE)
+    execute_process(
+        COMMAND brew --prefix
+        OUTPUT_VARIABLE HOMEBREW_PREFIX
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if(HOMEBREW_PREFIX)
+        link_directories("${HOMEBREW_PREFIX}/lib")
+    endif()
+endif()
+
+# ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
 
@@ -41,6 +57,7 @@ fetchcontent_declare(
 fetchcontent_makeavailable(nlohmann_json)
 
 # libcurl — built from source; TLS backend is platform-dependent
+set(CURL_USE_LIBIDN2   OFF CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(BUILD_EXAMPLES   OFF CACHE BOOL "" FORCE)
 set(BUILD_LIBCURL_DOCS OFF CACHE BOOL "" FORCE)
@@ -101,7 +118,10 @@ if(NOT WIN32)
         GIT_TAG        v4.3.3
         GIT_SHALLOW    TRUE
     )
+    # libwebsockets v4.3.3 declares cmake_minimum_required < 3.5, which CMake 4.x removed.
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
     fetchcontent_makeavailable(libwebsockets)
+    unset(CMAKE_POLICY_VERSION_MINIMUM)
 endif()
 
 # miniaudio is only needed by the realtime microphone example
