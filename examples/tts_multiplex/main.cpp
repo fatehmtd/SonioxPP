@@ -1,18 +1,14 @@
-/**
- * @file main.cpp
- * @brief Soniox TTS WebSocket multiplexing example.
- *
- * Opens a single TTS WebSocket connection and starts three concurrent streams,
- * each synthesising a different text with a different voice and language.
- * Audio for each stream is written to a separate output file.  The program
- * waits until all streams have terminated before closing the connection.
- *
- * Demonstrates that up to five streams may be active simultaneously on one
- * TTS WebSocket connection, with audio chunks routed by stream_id.
+/*
+ * TTS multiplexing — three concurrent streams over one WebSocket connection.
+ * Each stream uses a different voice and language; audio is written to separate files.
  *
  * Usage:
- *   export SONIOX_API_KEY=<your_key>
- *   ./soniox_tts_multiplex [--format wav] [--debug]
+ *   export SONIOX_API_KEY=<key>
+ *   ./soniox_tts_multiplex [options]
+ *
+ * Options:
+ *   --format <fmt>   audio output format (default: wav)
+ *   --debug          verbose logging
  */
 
 #include <CLI/CLI.hpp>

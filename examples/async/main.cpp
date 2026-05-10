@@ -1,25 +1,19 @@
-/**
- * @file main.cpp
- * @brief Soniox async transcription example.
+/*
+ * Transcribe an audio file using the Soniox async REST API.
+ * Uploads the file (or submits a URL), polls until the job finishes, then prints the transcript.
  *
- * Uploads a local audio file (or uses a public URL) and transcribes it using
- * Soniox's async REST API.  Polls until the job completes, then prints the
- * full transcript with optional speaker labels.
- *
- * Usage — local file:
- *   export SONIOX_API_KEY=<your_key>
- *   ./soniox_async <audio_file.wav> [options]
- *
- * Usage — public URL:
+ * Usage:
+ *   export SONIOX_API_KEY=<key>
+ *   ./soniox_async <file> [options]
  *   ./soniox_async --url <https://...> [options]
  *
  * Options:
- *   --lang <code>   Comma-separated language hints (default: en)
- *   --diarize       Enable speaker diarization
- *   --lang-id       Enable per-token language identification
- *   --poll-ms <ms>  Polling interval in ms (default: 1000)
- *   --no-cleanup    Keep the transcription job and file after completion
- *   --debug         Enable debug logging
+ *   --lang <code>    language hints, comma-separated (default: en)
+ *   --diarize        enable speaker diarization
+ *   --lang-id        tag each token with its detected language
+ *   --poll-ms <ms>   polling interval (default: 1000)
+ *   --no-cleanup     keep the uploaded file and job after completion
+ *   --debug          verbose logging
  */
 
 #include <CLI/CLI.hpp>

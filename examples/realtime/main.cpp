@@ -1,19 +1,19 @@
-/**
- * @file main.cpp
- * @brief Soniox real-time streaming example.
- *
- * Reads an audio file from disk and streams it to Soniox's WebSocket
- * endpoint in fixed-size chunks with a configurable inter-chunk delay,
- * simulating a live microphone feed.  Transcription tokens are printed
- * as they arrive; a live preview line is updated in-place and final
- * tokens are committed to the running transcript.
+/*
+ * Stream an audio file to the Soniox real-time STT WebSocket.
+ * Chunks are sent with a configurable delay to simulate a live feed.
+ * Non-final tokens update a live preview line; final tokens build the running transcript.
  *
  * Usage:
- *   export SONIOX_API_KEY=<your_key>
- *   ./soniox_realtime <audio_file> [--format auto] [--chunk-ms 120]
+ *   export SONIOX_API_KEY=<key>
+ *   ./soniox_realtime <file> [options]
  *
- * Supported audio formats: wav, pcm_s16le, mp3, ogg, flac (pass "auto"
- * to let the server detect the format automatically).
+ * Options:
+ *   --format <fmt>   audio format hint (default: auto)
+ *   --chunk-ms <ms>  inter-chunk delay in milliseconds (default: 120)
+ *   --lang <code>    language hints, comma-separated (default: en)
+ *   --diarize        enable speaker diarization
+ *   --lang-id        tag each token with its detected language
+ *   --debug          verbose logging
  */
 
 #include <CLI/CLI.hpp>

@@ -1,22 +1,17 @@
-/**
- * @file main.cpp
- * @brief Soniox real-time translation example.
- *
- * Streams an audio file to the Soniox WebSocket endpoint with one-way
- * translation enabled.  Incoming tokens are separated by translation_status
- * and printed on two independent running lines: one for the original speech
- * and one for the translated output.
+/*
+ * Real-time transcription with one-way translation.
+ * Original and translated tokens are printed on two separate live lines.
  *
  * Usage:
- *   export SONIOX_API_KEY=<your_key>
- *   ./soniox_realtime_translation <audio_file> [options]
+ *   export SONIOX_API_KEY=<key>
+ *   ./soniox_realtime_translation <file> [options]
  *
  * Options:
- *   --src-lang <code>   Source language BCP-47 hint (default: en)
- *   --tgt-lang <code>   Target translation language (default: es)
- *   --format <fmt>      Audio format hint (default: auto)
- *   --chunk-ms <ms>     Simulated chunk delay in ms (default: 120)
- *   --debug             Enable debug logging
+ *   --src-lang <code>   source language hint (default: en)
+ *   --tgt-lang <code>   translation target language (default: es)
+ *   --format <fmt>      audio format hint (default: auto)
+ *   --chunk-ms <ms>     inter-chunk delay in milliseconds (default: 120)
+ *   --debug             verbose logging
  */
 
 #include <CLI/CLI.hpp>

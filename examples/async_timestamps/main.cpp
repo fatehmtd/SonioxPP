@@ -1,28 +1,20 @@
-/**
- * @file main.cpp
- * @brief Soniox async transcription with per-token timestamps.
+/*
+ * Async transcription with per-token timestamps, confidence scores, and speaker labels.
+ * Output is either a tab-separated table or SRT subtitles.
  *
- * Uses SttRestClient directly (typed REST API) to upload an audio file,
- * create a transcription job with optional diarization and language
- * identification, poll for completion, and render the result either as
- * SRT subtitles or a tab-separated token table showing start_ms, end_ms,
- * confidence, speaker, and language for every token.
- *
- * Usage — local file:
- *   export SONIOX_API_KEY=<your_key>
- *   ./soniox_async_timestamps <audio_file> [options]
- *
- * Usage — public URL:
+ * Usage:
+ *   export SONIOX_API_KEY=<key>
+ *   ./soniox_async_timestamps <file> [options]
  *   ./soniox_async_timestamps --url <https://...> [options]
  *
  * Options:
- *   --lang <code>       Comma-separated language hints (default: en)
- *   --diarize           Enable speaker diarization
- *   --lang-id           Enable per-token language identification
- *   --output srt|table  Output format (default: table)
- *   --poll-ms <ms>      Polling interval in ms (default: 1000)
- *   --no-cleanup        Keep the transcription job and file after completion
- *   --debug             Enable debug logging
+ *   --lang <code>       language hints, comma-separated (default: en)
+ *   --diarize           enable speaker diarization
+ *   --lang-id           tag each token with its detected language
+ *   --output srt|table  output format (default: table)
+ *   --poll-ms <ms>      polling interval (default: 1000)
+ *   --no-cleanup        keep the uploaded file and job after completion
+ *   --debug             verbose logging
  */
 
 #include <CLI/CLI.hpp>

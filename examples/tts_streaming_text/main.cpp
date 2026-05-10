@@ -1,28 +1,21 @@
-/**
- * @file main.cpp
- * @brief Soniox incremental TTS text-streaming example.
- *
- * Reads text from a file or stdin, splits it into individual words, and
- * sends them one at a time to the TTS WebSocket with a configurable inter-word
- * delay.  All calls except the last use sendText(..., false); the final word
- * uses sendText(..., true).  This simulates the token-by-token output of an
- * LLM and demonstrates that audio synthesis begins before all text has arrived.
- *
- * Time-to-first-audio (TTFA) and total synthesis time are reported on exit.
+/*
+ * Incremental TTS — simulates LLM token-by-token output over a real-time WebSocket.
+ * Words are sent one at a time; synthesis starts before all text has been received.
+ * Prints time-to-first-audio and total synthesis time on exit.
  *
  * Usage:
- *   export SONIOX_API_KEY=<your_key>
+ *   export SONIOX_API_KEY=<key>
  *   ./soniox_tts_streaming_text --file <text_file> [options]
  *   echo "Hello world" | ./soniox_tts_streaming_text [options]
  *
  * Options:
- *   --file <path>          Read text from file instead of stdin
- *   --lang <code>          BCP-47 language code (default: en)
- *   --voice <name>         Voice name (default: Adrian)
- *   --format <fmt>         Audio output format (default: wav)
- *   --out <path>           Output audio file path (default: tts_streaming_output.wav)
- *   --word-delay-ms <ms>   Delay between sending each word (default: 80)
- *   --debug                Enable debug logging
+ *   --file <path>         read text from file instead of stdin
+ *   --lang <code>         BCP-47 language code (default: en)
+ *   --voice <name>        voice name (default: Adrian)
+ *   --format <fmt>        audio output format (default: wav)
+ *   --out <path>          output file path (default: tts_streaming_output.wav)
+ *   --word-delay-ms <ms>  delay between words in milliseconds (default: 80)
+ *   --debug               verbose logging
  */
 
 #include <CLI/CLI.hpp>

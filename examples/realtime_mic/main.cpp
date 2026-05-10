@@ -1,26 +1,17 @@
-/**
- * @file main.cpp
- * @brief Soniox real-time streaming with live microphone capture via miniaudio.
- *
- * Captures PCM audio from the system's default input device using miniaudio
- * and streams it directly to Soniox's WebSocket endpoint.  Transcription
- * tokens are printed as they arrive; a live preview line is updated in-place
- * and final tokens are committed to the running transcript.
+/*
+ * Live microphone transcription using the Soniox real-time STT WebSocket.
+ * Captures 16 kHz mono PCM from the default input device via miniaudio.
+ * Press Enter or Ctrl+C to stop recording and receive the final transcript.
  *
  * Usage:
- *   export SONIOX_API_KEY=<your_key>
+ *   export SONIOX_API_KEY=<key>
  *   ./soniox_realtime_mic [options]
  *
- * Press Enter or Ctrl+C to stop recording and wait for the final transcript.
- *
  * Options:
- *   --lang <code>   Comma-separated language hints (default: en)
- *   --diarize       Enable speaker diarization
- *   --lang-id       Enable per-token language identification
- *   --debug         Enable debug logging
- *
- * Audio captured at 16 kHz, mono, 16-bit signed PCM — the most efficient
- * format for speech recognition and a perfect match for pcm_s16le.
+ *   --lang <code>   language hints, comma-separated (default: en)
+ *   --diarize       enable speaker diarization
+ *   --lang-id       tag each token with its detected language
+ *   --debug         verbose logging
  */
 
 // Compile miniaudio implementation in this translation unit
@@ -65,12 +56,6 @@ struct CaptureState {
     bool                             stopped{false};
 };
 
-/**
- * @brief miniaudio data callback — invoked on miniaudio's internal audio thread.
- *
- * Copies each captured PCM buffer into the shared queue so the sender thread
- * can forward it to Soniox without blocking the real-time audio thread.
- */
 static void captureCallback(ma_device* device, void* /*output*/,
                              const void* input, ma_uint32 frame_count)
 {
