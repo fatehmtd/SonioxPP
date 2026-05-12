@@ -38,7 +38,10 @@ json buildTranslationJson(const Translation& translation)
         t["type"] = translation.type;
     }
     if (!translation.language_a.empty()) {
-        t["language_a"] = translation.language_a;
+        // one_way: API expects "target_language"; two_way: API expects "language_a"
+        const char* key = (translation.type == stt::translation_types::one_way)
+                          ? "target_language" : "language_a";
+        t[key] = translation.language_a;
     }
     if (!translation.language_b.empty()) {
         t["language_b"] = translation.language_b;
@@ -154,8 +157,12 @@ private:
                 token.text = item.value("text", std::string());
                 token.is_final = item.value("is_final", false);
                 token.speaker = item.value("speaker", 0);
-                token.language = item.value("language", std::string());
-                token.translation_status = item.value("translation_status", std::string());
+                const auto langIt = item.find("language");
+                if (langIt != item.end() && !langIt->is_null())
+                    token.language = langIt->get<std::string>();
+                const auto tsIt = item.find("translation_status");
+                if (tsIt != item.end() && !tsIt->is_null())
+                    token.translation_status = tsIt->get<std::string>();
                 if (token.is_final) {
                     has_final = true;
                 }

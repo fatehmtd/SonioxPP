@@ -38,12 +38,22 @@ json buildTranslationJson(const Translation& translation)
         t["type"] = translation.type;
     }
     if (!translation.language_a.empty()) {
-        t["language_a"] = translation.language_a;
+        // one_way: API expects "target_language"; two_way: API expects "language_a"
+        const char* key = (translation.type == stt::translation_types::one_way)
+                          ? "target_language" : "language_a";
+        t[key] = translation.language_a;
     }
     if (!translation.language_b.empty()) {
         t["language_b"] = translation.language_b;
     }
     return t;
+}
+
+static std::string jsonStringField(const json& obj, const char* key)
+{
+    const auto it = obj.find(key);
+    if (it == obj.end() || it->is_null()) return {};
+    return it->get<std::string>();
 }
 
 std::string parseRequiredId(const std::string& body, const char* operation)
@@ -106,10 +116,11 @@ public:
         const json payload = json::parse(_restClient.getTranscription(transcriptionId));
 
         AsyncTranscription result;
-        result.id = payload.value("id", transcriptionId);
-        result.error_message = payload.value("error_message", std::string());
+        result.id = jsonStringField(payload, "id");
+        if (result.id.empty()) result.id = transcriptionId;
+        result.error_message = jsonStringField(payload, "error_message");
 
-        const std::string status = payload.value("status", std::string("pending"));
+        const std::string status = jsonStringField(payload, "status");
         if (status == "completed") {
             result.status = TranscriptionStatus::Completed;
         } else if (status == "running") {
@@ -134,11 +145,15 @@ public:
 
         for (const auto& item : payload["tokens"]) {
             Token token;
-            token.text = item.value("text", std::string());
+            token.text = jsonStringField(item, "text");
             token.is_final = item.value("is_final", true);
-            token.speaker = item.value("speaker", 0);
-            token.language = item.value("language", std::string());
-            token.translation_status = item.value("translation_status", std::string());
+            // async REST API returns speaker as a string (e.g. "0"); realtime uses int
+            const std::string speakerStr = jsonStringField(item, "speaker");
+            if (!speakerStr.empty()) {
+                try { token.speaker = std::stoi(speakerStr); } catch (...) {}
+            }
+            token.language = jsonStringField(item, "language");
+            token.translation_status = jsonStringField(item, "translation_status");
             token.start_ms = item.value("start_ms", 0);
 
             if (item.contains("duration_ms") && item["duration_ms"].is_number_integer()) {
