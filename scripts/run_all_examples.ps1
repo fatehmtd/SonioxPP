@@ -102,18 +102,24 @@ Run-Example "STT Async REST  (with speaker diarization)" {
     if (-not ($script:asyncOut -match "Transcript")) { throw "'Transcript' not found in output" }
 }
 
-Run-Example "STT Async Timestamps  --  table  ->  data\timestamps_table.txt" {
-    $script:tableOut = & "$BuildDir\async_timestamps\Debug\soniox_async_timestamps.exe" `
-        "$DataDir\sample_audio.wav" --lang en --output table
-    $script:tableOut | Write-Host
-    $script:tableOut | Out-File "$DataDir\timestamps_table.txt" -Encoding utf8
+# Upload once; reuse the file ID for both table and SRT to avoid a second upload.
+$script:tsFileId = ""
+Run-Example "STT Async Timestamps  --  upload" {
+    $script:uploadOut = & "$BuildDir\async_timestamps\Debug\soniox_async_timestamps.exe" `
+        "$DataDir\sample_audio.wav" --lang en --output table --no-cleanup
+    $script:uploadOut | Write-Host
+    $m = [regex]::Match($script:uploadOut, "File ID:\s*(\S+)")
+    if (-not $m.Success) { throw "File ID not found in upload output" }
+    $script:tsFileId = $m.Groups[1].Value
+    if (-not ($script:uploadOut -match "start_ms")) { throw "Expected 'start_ms' header in table output" }
+    $script:uploadOut | Out-File "$DataDir\timestamps_table.txt" -Encoding utf8
 } {
-    if (-not ($script:tableOut -match "start_ms")) { throw "Expected 'start_ms' header in table output" }
+    if (-not $script:tsFileId) { throw "File ID is empty after upload step" }
 }
 
 Run-Example "STT Async Timestamps  --  SRT  ->  data\output.srt" {
     $script:srtOut = & "$BuildDir\async_timestamps\Debug\soniox_async_timestamps.exe" `
-        "$DataDir\sample_audio.wav" --lang en --output srt
+        --file-id $script:tsFileId --lang en --output srt
     $script:srtOut | Write-Host
     $script:srtOut | Out-File "$DataDir\output.srt" -Encoding utf8
 } {

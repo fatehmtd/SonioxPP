@@ -6,6 +6,7 @@
  *   export SONIOX_API_KEY=<key>
  *   ./soniox_async_timestamps <file> [options]
  *   ./soniox_async_timestamps --url <https://...> [options]
+ *   ./soniox_async_timestamps --file-id <id> [options]
  *
  * Options:
  *   --lang <code>       language hints, comma-separated (default: en)
@@ -13,6 +14,7 @@
  *   --lang-id           tag each token with its detected language
  *   --output srt|table  output format (default: table)
  *   --poll-ms <ms>      polling interval (default: 1000)
+ *   --file-id <id>      use a pre-uploaded file ID (skips upload; implies --no-cleanup for the file)
  *   --no-cleanup        keep the uploaded file and job after completion
  *   --debug             verbose logging
  */
@@ -99,6 +101,7 @@ int main(int argc, char* argv[])
 
     std::string              audio_path;
     std::string              audio_url;
+    std::string              file_id_opt;
     std::vector<std::string> langs{"en"};
     bool                     diarize    = false;
     bool                     lang_id    = false;
@@ -108,20 +111,21 @@ int main(int argc, char* argv[])
     bool                     debug      = false;
 
     CLI::App app{"Transcribe audio and render per-token timestamps via Soniox async REST API"};
-    app.add_option("file",       audio_path, "Local audio file to transcribe");
-    app.add_option("--url",      audio_url,  "Public HTTPS URL of the audio file");
-    app.add_option("--lang",     langs,      "Language hints (comma-separated, e.g. en,es)")->delimiter(',');
-    app.add_option("--output",   output,     "Output format: srt or table")
+    app.add_option("file",        audio_path, "Local audio file to transcribe");
+    app.add_option("--url",       audio_url,  "Public HTTPS URL of the audio file");
+    app.add_option("--file-id",   file_id_opt,"Pre-uploaded file ID (skips upload)");
+    app.add_option("--lang",      langs,      "Language hints (comma-separated, e.g. en,es)")->delimiter(',');
+    app.add_option("--output",    output,     "Output format: srt or table")
        ->check(CLI::IsMember({"srt", "table"}));
-    app.add_option("--poll-ms",  poll_ms,    "Polling interval in milliseconds");
-    app.add_flag("--diarize",    diarize,    "Enable speaker diarization");
-    app.add_flag("--lang-id",    lang_id,    "Enable per-token language identification");
-    app.add_flag("--no-cleanup", no_cleanup, "Keep job and file after completion");
-    app.add_flag("--debug",      debug,      "Enable debug logging");
+    app.add_option("--poll-ms",   poll_ms,    "Polling interval in milliseconds");
+    app.add_flag("--diarize",     diarize,    "Enable speaker diarization");
+    app.add_flag("--lang-id",     lang_id,    "Enable per-token language identification");
+    app.add_flag("--no-cleanup",  no_cleanup, "Keep job and file after completion");
+    app.add_flag("--debug",       debug,      "Enable debug logging");
     CLI11_PARSE(app, argc, argv);
 
-    if (audio_path.empty() && audio_url.empty()) {
-        std::cerr << "Error: provide an audio file or --url <url>.\n" << app.help();
+    if (audio_path.empty() && audio_url.empty() && file_id_opt.empty()) {
+        std::cerr << "Error: provide an audio file, --url <url>, or --file-id <id>.\n" << app.help();
         return 1;
     }
 
@@ -130,9 +134,13 @@ int main(int argc, char* argv[])
 
     soniox::SttRestClient client(api_key_env);
     std::string file_id;
+    bool        file_id_external = !file_id_opt.empty();
 
     try {
-        if (!audio_path.empty()) {
+        if (!file_id_opt.empty()) {
+            file_id = file_id_opt;
+            std::cout << "File ID: " << file_id << " (pre-uploaded)\n";
+        } else if (!audio_path.empty()) {
             std::cout << "Uploading " << audio_path << "...\n";
             soniox::SttFile f = client.uploadFileTyped(audio_path);
             file_id = f.id;
@@ -164,7 +172,7 @@ int main(int argc, char* argv[])
                       << tx.error_message << "\n";
             if (cleanup) {
                 try { client.deleteTranscription(tx.id); } catch (...) {}
-                if (!file_id.empty())
+                if (!file_id.empty() && !file_id_external)
                     try { client.deleteFile(file_id); } catch (...) {}
             }
             return 1;
@@ -174,7 +182,7 @@ int main(int argc, char* argv[])
 
         if (cleanup) {
             client.deleteTranscription(tx.id);
-            if (!file_id.empty())
+            if (!file_id.empty() && !file_id_external)
                 client.deleteFile(file_id);
         }
 
