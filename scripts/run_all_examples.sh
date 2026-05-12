@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/run_all_examples_mac.sh
+# scripts/run_all_examples.sh
 # Runs all SonioxPP examples end-to-end and prints a pass/fail summary.
 #
 # Prerequisites:
@@ -8,7 +8,7 @@
 #
 # Usage:
 #   export SONIOX_API_KEY="your_key_here"
-#   bash scripts/run_all_examples_mac.sh
+#   bash scripts/run_all_examples.sh
 
 set -euo pipefail
 
@@ -43,7 +43,11 @@ assert_file() {
         return 1
     fi
     local sz
-    sz=$(stat -f%z "$path")
+    if [[ "$(uname)" == "Darwin" ]]; then
+        sz=$(stat -f%z "$path")
+    else
+        sz=$(stat -c%s "$path")
+    fi
     if (( sz < min_bytes )); then
         echo "  FAIL: Output file too small ($sz bytes): $path" >&2
         return 1
@@ -51,10 +55,10 @@ assert_file() {
     echo -e "  ${GRAY}-> $path ($sz bytes)${NC}"
 }
 
-# ── TTS ───────────────────────────────────────────────────────────────────────
+# -- TTS -----------------------------------------------------------------------
 
 echo ""
-echo -e "${CYAN}──── TTS REST  ->  data/sample_audio.wav ────${NC}"
+echo -e "${CYAN}---- TTS REST  ->  data/sample_audio.wav ----${NC}"
 (
     set +e
     "$BUILD_DIR/tts_rest/soniox_tts_rest" \
@@ -68,7 +72,7 @@ echo -e "${CYAN}──── TTS REST  ->  data/sample_audio.wav ────${N
   || { echo -e "  ${RED}FAIL${NC}"; FAIL_NAMES+=("TTS REST  ->  data/sample_audio.wav"); FAIL_ERRORS+=("see above"); }
 
 echo ""
-echo -e "${CYAN}──── TTS Realtime WebSocket  ->  data/tts_realtime_output.wav ────${NC}"
+echo -e "${CYAN}---- TTS Realtime WebSocket  ->  data/tts_realtime_output.wav ----${NC}"
 (
     set +e
     "$BUILD_DIR/tts_realtime/soniox_tts_realtime" \
@@ -82,7 +86,7 @@ echo -e "${CYAN}──── TTS Realtime WebSocket  ->  data/tts_realtime_outpu
   || { echo -e "  ${RED}FAIL${NC}"; FAIL_NAMES+=("TTS Realtime WebSocket  ->  data/tts_realtime_output.wav"); FAIL_ERRORS+=("see above"); }
 
 echo ""
-echo -e "${CYAN}──── TTS Multiplex  (3 concurrent streams)  ->  data/multiplex_s*.wav ────${NC}"
+echo -e "${CYAN}---- TTS Multiplex  (3 concurrent streams)  ->  data/multiplex_s*.wav ----${NC}"
 (
     set +e
     pushd "$DATA_DIR" > /dev/null
@@ -98,7 +102,7 @@ echo -e "${CYAN}──── TTS Multiplex  (3 concurrent streams)  ->  data/mul
   || { echo -e "  ${RED}FAIL${NC}"; FAIL_NAMES+=("TTS Multiplex  (3 concurrent streams)"); FAIL_ERRORS+=("see above"); }
 
 echo ""
-echo -e "${CYAN}──── TTS Streaming Text (TTFA benchmark)  ->  data/tts_streaming_output.wav ────${NC}"
+echo -e "${CYAN}---- TTS Streaming Text (TTFA benchmark)  ->  data/tts_streaming_output.wav ----${NC}"
 (
     set +e
     ttfa_output=$("$BUILD_DIR/tts_streaming_text/soniox_tts_streaming_text" \
@@ -116,17 +120,17 @@ echo -e "${CYAN}──── TTS Streaming Text (TTFA benchmark)  ->  data/tts_s
 ) && { echo -e "  ${GREEN}PASS${NC}"; PASS_NAMES+=("TTS Streaming Text (TTFA benchmark)"); } \
   || { echo -e "  ${RED}FAIL${NC}"; FAIL_NAMES+=("TTS Streaming Text (TTFA benchmark)"); FAIL_ERRORS+=("see above"); }
 
-# ── STT ───────────────────────────────────────────────────────────────────────
+# -- STT -----------------------------------------------------------------------
 
 echo ""
-echo -e "${CYAN}──── STT Realtime WebSocket ────${NC}"
+echo -e "${CYAN}---- STT Realtime WebSocket ----${NC}"
 (
     "$BUILD_DIR/realtime/soniox_realtime" "$DATA_DIR/sample_audio.wav" --lang en
 ) && { echo -e "  ${GREEN}PASS${NC}"; PASS_NAMES+=("STT Realtime WebSocket"); } \
   || { echo -e "  ${RED}FAIL${NC}"; FAIL_NAMES+=("STT Realtime WebSocket"); FAIL_ERRORS+=("see above"); }
 
 echo ""
-echo -e "${CYAN}──── STT Async REST  (with speaker diarization) ────${NC}"
+echo -e "${CYAN}---- STT Async REST  (with speaker diarization) ----${NC}"
 (
     set +e
     async_out=$("$BUILD_DIR/async/soniox_async" \
@@ -147,7 +151,7 @@ TS_FILE_TMP=$(mktemp)
 TS_FILE_ID=""
 
 echo ""
-echo -e "${CYAN}──── STT Async Timestamps  --  table  ->  data/timestamps_table.txt ────${NC}"
+echo -e "${CYAN}---- STT Async Timestamps  --  table  ->  data/timestamps_table.txt ----${NC}"
 (
     set +e
     table_out=$("$BUILD_DIR/async_timestamps/soniox_async_timestamps" \
@@ -178,7 +182,7 @@ echo -e "${CYAN}──── STT Async Timestamps  --  table  ->  data/timestamp
 }
 
 echo ""
-echo -e "${CYAN}──── STT Async Timestamps  --  SRT  ->  data/output.srt ────${NC}"
+echo -e "${CYAN}---- STT Async Timestamps  --  SRT  ->  data/output.srt ----${NC}"
 (
     set +e
     if [[ -z "$TS_FILE_ID" ]]; then
@@ -192,7 +196,7 @@ echo -e "${CYAN}──── STT Async Timestamps  --  SRT  ->  data/output.srt 
     echo "$srt_out"
     if [[ $exit_code -ne 0 ]]; then exit $exit_code; fi
     echo "$srt_out" > "$DATA_DIR/output.srt"
-    if [[ "$srt_out" != *"-->"* ]]; then
+    if ! echo "$srt_out" | grep -qF "-->"; then
         echo "  FAIL: Expected SRT timestamp marker '-->' in output" >&2
         exit 1
     fi
@@ -202,7 +206,7 @@ echo -e "${CYAN}──── STT Async Timestamps  --  SRT  ->  data/output.srt 
 rm -f "$TS_FILE_TMP"
 
 echo ""
-echo -e "${CYAN}──── STT Realtime Translation  en -> es ────${NC}"
+echo -e "${CYAN}---- STT Realtime Translation  en -> es ----${NC}"
 (
     set +e
     trans_out=$("$BUILD_DIR/realtime_translation/soniox_realtime_translation" \
@@ -222,7 +226,7 @@ echo -e "${CYAN}──── STT Realtime Translation  en -> es ────${NC
 ) && { echo -e "  ${GREEN}PASS${NC}"; PASS_NAMES+=("STT Realtime Translation  en -> es"); } \
   || { echo -e "  ${RED}FAIL${NC}"; FAIL_NAMES+=("STT Realtime Translation  en -> es"); FAIL_ERRORS+=("see above"); }
 
-# ── Summary ───────────────────────────────────────────────────────────────────
+# -- Summary -------------------------------------------------------------------
 
 passed=${#PASS_NAMES[@]}
 failed=${#FAIL_NAMES[@]}

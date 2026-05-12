@@ -25,7 +25,7 @@ New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 
 function Run-Example([string]$Name, [scriptblock]$Action, [scriptblock]$Verify) {
     Write-Host ""
-    Write-Host "──── $Name ────" -ForegroundColor Cyan
+    Write-Host "---- $Name ----" -ForegroundColor Cyan
     try {
         & $Action
         & $Verify
@@ -44,7 +44,7 @@ function Assert-File([string]$Path, [int]$MinBytes = 10240) {
     Write-Host "  -> $Path ($sz bytes)" -ForegroundColor DarkGray
 }
 
-# ── TTS ───────────────────────────────────────────────────────────────────────
+# -- TTS -----------------------------------------------------------------------
 
 Run-Example "TTS REST  ->  data\sample_audio.wav" {
     & "$BuildDir\tts_rest\Debug\soniox_tts_rest.exe" `
@@ -85,7 +85,7 @@ Run-Example "TTS Streaming Text (TTFA benchmark)  ->  data\tts_streaming_output.
     if (-not ($script:ttfaOutput -match "TTFA:")) { throw "TTFA timing not found in output" }
 }
 
-# ── STT ───────────────────────────────────────────────────────────────────────
+# -- STT -----------------------------------------------------------------------
 
 Run-Example "STT Realtime WebSocket" {
     & "$BuildDir\realtime\Debug\soniox_realtime.exe" `
@@ -135,7 +135,7 @@ Run-Example "STT Realtime Translation  en -> es" {
     if (-not ($script:transOut -match "\[tran\]")) { throw "Expected [tran] label in output" }
 }
 
-# ── Summary ───────────────────────────────────────────────────────────────────
+# -- Summary -------------------------------------------------------------------
 
 Write-Host ""
 Write-Host "═══════════════════════ SUMMARY ═══════════════════════" -ForegroundColor White
