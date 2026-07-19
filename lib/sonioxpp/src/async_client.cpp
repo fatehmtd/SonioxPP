@@ -37,14 +37,20 @@ json buildTranslationJson(const Translation& translation)
     if (!translation.type.empty()) {
         t["type"] = translation.type;
     }
-    if (!translation.language_a.empty()) {
-        // one_way: API expects "target_language"; two_way: API expects "language_a"
-        const char* key = (translation.type == stt::translation_types::one_way)
-                          ? "target_language" : "language_a";
-        t[key] = translation.language_a;
-    }
-    if (!translation.language_b.empty()) {
-        t["language_b"] = translation.language_b;
+    if (translation.type == stt::translation_types::one_way) {
+        // language_a kept as a legacy fallback for the one_way target
+        const std::string& target = !translation.target_language.empty()
+                                    ? translation.target_language : translation.language_a;
+        if (!target.empty()) {
+            t["target_language"] = target;
+        }
+    } else {
+        if (!translation.language_a.empty()) {
+            t["language_a"] = translation.language_a;
+        }
+        if (!translation.language_b.empty()) {
+            t["language_b"] = translation.language_b;
+        }
     }
     return t;
 }
@@ -95,8 +101,13 @@ public:
         request.audio_url = config.audio_url;
         request.file_id = config.file_id;
         request.language_hints = config.language_hints;
+        request.language_hints_strict = config.language_hints_strict;
         request.enable_language_identification = config.enable_language_identification;
         request.enable_speaker_diarization = config.enable_speaker_diarization;
+        request.webhook_url = config.webhook_url;
+        request.webhook_auth_header_name = config.webhook_auth_header_name;
+        request.webhook_auth_header_value = config.webhook_auth_header_value;
+        request.client_reference_id = config.client_reference_id;
 
         const json context = buildContextJson(config.context);
         if (!context.empty()) {
@@ -147,20 +158,23 @@ public:
             Token token;
             token.text = jsonStringField(item, "text");
             token.is_final = item.value("is_final", true);
-            // async REST API returns speaker as a string (e.g. "0"); realtime uses int
+            // API returns speaker as a string label (e.g. "1")
             const std::string speakerStr = jsonStringField(item, "speaker");
             if (!speakerStr.empty()) {
                 try { token.speaker = std::stoi(speakerStr); } catch (...) {}
             }
             token.language = jsonStringField(item, "language");
+            token.source_language = jsonStringField(item, "source_language");
             token.translation_status = jsonStringField(item, "translation_status");
             token.start_ms = item.value("start_ms", 0);
+            token.confidence = item.value("confidence", 0.0);
 
             if (item.contains("duration_ms") && item["duration_ms"].is_number_integer()) {
                 token.duration_ms = item.value("duration_ms", 0);
+                token.end_ms = token.start_ms + token.duration_ms;
             } else {
-                const int end_ms = item.value("end_ms", token.start_ms);
-                token.duration_ms = (end_ms >= token.start_ms) ? (end_ms - token.start_ms) : 0;
+                token.end_ms = item.value("end_ms", token.start_ms);
+                token.duration_ms = (token.end_ms >= token.start_ms) ? (token.end_ms - token.start_ms) : 0;
             }
 
             tokens.push_back(std::move(token));

@@ -83,7 +83,7 @@ int main(int argc, char* argv[])
 
     soniox::AsyncConfig config;
     config.api_key                        = api_key_env;
-    config.model                          = soniox::stt::models::async_v4;
+    config.model                          = soniox::stt::models::async_v5;
     config.language_hints                 = langs;
     config.enable_speaker_diarization     = diarize;
     config.enable_language_identification = lang_id;

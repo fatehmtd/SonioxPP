@@ -74,11 +74,16 @@ size_t writeHeaderCallback(char* ptr, size_t size, size_t nmemb, void* userdata)
 
 curl_mime* buildMime(CURL* curl, const HttpRequest& request)
 {
-    if (request.multipart_files.empty()) {
+    if (request.multipart_files.empty() && request.multipart_fields.empty()) {
         return nullptr;
     }
 
     curl_mime* mime = curl_mime_init(curl);
+    for (const auto& field : request.multipart_fields) {
+        curl_mimepart* part = curl_mime_addpart(mime);
+        curl_mime_name(part, field.field_name.c_str());
+        curl_mime_data(part, field.value.c_str(), field.value.size());
+    }
     for (const auto& file : request.multipart_files) {
         curl_mimepart* part = curl_mime_addpart(mime);
         curl_mime_name(part, file.field_name.c_str());
@@ -139,9 +144,8 @@ HttpResponse CurlHttpTransport::send(const HttpRequest& request)
         break;
     }
 
-    curl_mime* mime = nullptr;
-    if (!request.multipart_files.empty()) {
-        mime = buildMime(curl, request);
+    curl_mime* mime = buildMime(curl, request);
+    if (mime != nullptr) {
         curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
     }
 

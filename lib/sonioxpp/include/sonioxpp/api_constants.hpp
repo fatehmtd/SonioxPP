@@ -4,10 +4,10 @@ namespace soniox::stt {
 
 namespace models {
 
-constexpr const char* realtime_v4 = "stt-rt-v4";
-constexpr const char* realtime_v3 = "stt-rt-v3"; // deprecated alias for v4
-constexpr const char* async_v4 = "stt-async-v4";
-constexpr const char* async_v3 = "stt-async-v3"; // deprecated alias for v4
+constexpr const char* realtime_v5 = "stt-rt-v5";
+constexpr const char* realtime_v4 = "stt-rt-v4"; // alias for v5
+constexpr const char* async_v5 = "stt-async-v5";
+constexpr const char* async_v4 = "stt-async-v4"; // alias for v5
 
 } // namespace models
 

@@ -60,7 +60,7 @@ int main(int argc, char* argv[])
 
     soniox::RealtimeConfig config;
     config.api_key                        = api_key_env;
-    config.model                          = soniox::stt::models::realtime_v4;
+    config.model                          = soniox::stt::models::realtime_v5;
     config.audio_format                   = audio_fmt;
     config.language_hints                 = langs;
     config.enable_speaker_diarization     = diarize;

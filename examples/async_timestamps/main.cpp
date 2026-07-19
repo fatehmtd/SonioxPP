@@ -148,7 +148,7 @@ int main(int argc, char* argv[])
         }
 
         soniox::SttCreateTranscriptionRequest req;
-        req.model                          = soniox::stt::models::async_v4;
+        req.model                          = soniox::stt::models::async_v5;
         req.language_hints                 = langs;
         req.enable_speaker_diarization     = diarize;
         req.enable_language_identification = lang_id;

@@ -196,7 +196,7 @@ echo -e "${CYAN}---- STT Async Timestamps  --  SRT  ->  data/output.srt ----${NC
     echo "$srt_out"
     if [[ $exit_code -ne 0 ]]; then exit $exit_code; fi
     echo "$srt_out" > "$DATA_DIR/output.srt"
-    if ! echo "$srt_out" | grep -qF "-->"; then
+    if [[ "$srt_out" != *"-->"* ]]; then
         echo "  FAIL: Expected SRT timestamp marker '-->' in output" >&2
         exit 1
     fi

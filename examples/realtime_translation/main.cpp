@@ -56,12 +56,12 @@ int main(int argc, char* argv[])
 
     soniox::RealtimeConfig config;
     config.api_key                  = api_key_env;
-    config.model                    = soniox::stt::models::realtime_v4;
+    config.model                    = soniox::stt::models::realtime_v5;
     config.audio_format             = audio_fmt;
     config.language_hints           = {src_lang};
     config.enable_endpoint_detection = true;
-    config.translation.type         = soniox::stt::translation_types::one_way;
-    config.translation.language_a   = tgt_lang;
+    config.translation.type            = soniox::stt::translation_types::one_way;
+    config.translation.target_language = tgt_lang;
 
     std::string orig_line;
     std::string tran_line;

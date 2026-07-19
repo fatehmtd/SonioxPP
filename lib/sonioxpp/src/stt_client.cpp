@@ -211,10 +211,7 @@ std::string SttRestClient::uploadFile(const std::string& file_path, const std::s
     request.multipart_files.push_back({"file", file_path, ""});
 
     if (!client_reference_id.empty()) {
-        json body;
-        body["client_reference_id"] = client_reference_id;
-        request.content_type = "application/json";
-        request.body = body.dump();
+        request.multipart_fields.push_back({"client_reference_id", client_reference_id});
     }
 
     const auto response = _httpTransport->send(request);
@@ -495,6 +492,12 @@ std::string SttRealtimeClient::buildConfigJson(const SttRealtimeConfig& config) 
 
     if (config.max_endpoint_delay_ms > 0) {
         payload["max_endpoint_delay_ms"] = config.max_endpoint_delay_ms;
+    }
+    if (config.endpoint_sensitivity != 0.0) {
+        payload["endpoint_sensitivity"] = config.endpoint_sensitivity;
+    }
+    if (config.endpoint_latency_adjustment_level > 0) {
+        payload["endpoint_latency_adjustment_level"] = config.endpoint_latency_adjustment_level;
     }
     if (!config.context_json.empty()) {
         payload["context"] = json::parse(config.context_json);

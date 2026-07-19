@@ -15,13 +15,19 @@ struct MultipartFile {
     std::string content_type; ///< empty = auto-detect from extension
 };
 
+struct MultipartField {
+    std::string field_name;
+    std::string value;
+};
+
 struct HttpRequest {
     HttpMethod  method{HttpMethod::Get};
     std::string url;
     std::map<std::string, std::string> headers;
     std::string content_type;
     std::string body;
-    std::vector<MultipartFile> multipart_files; ///< mutually exclusive with body
+    std::vector<MultipartFile>  multipart_files;  ///< mutually exclusive with body
+    std::vector<MultipartField> multipart_fields; ///< plain form fields sent with multipart_files
     long timeout_ms{0};
 };
 

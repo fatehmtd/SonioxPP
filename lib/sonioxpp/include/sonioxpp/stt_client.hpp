@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sonioxpp/api_constants.hpp>
+#include <sonioxpp/types.hpp>
 #include <sonioxpp/transport/http_transport.hpp>
 #include <sonioxpp/transport/websocket_transport.hpp>
 
@@ -79,13 +80,8 @@ struct SttTranscript {
 };
 
 // ---------------------------------------------------------------------------
-// Pagination
+// Pagination  (PaginationQuery lives in types.hpp)
 // ---------------------------------------------------------------------------
-
-struct PaginationQuery {
-    int         limit{0};  ///< 1–1000; 0 = server default of 1000
-    std::string cursor;    ///< opaque cursor from next_page_cursor; empty = first page
-};
 
 struct SttListFilesTypedResult {
     std::vector<SttFile> files;
@@ -113,7 +109,7 @@ struct SttListTranscriptionsResult {
 
 /// Set exactly one of audio_url or file_id.
 struct SttCreateTranscriptionRequest {
-    std::string model{stt::models::async_v4};
+    std::string model{stt::models::async_v5};
 
     std::string audio_url;
     std::string file_id;
@@ -211,7 +207,7 @@ private:
 /// Sent as a JSON text frame immediately after the WebSocket connection is established.
 struct SttRealtimeConfig {
     std::string api_key;
-    std::string model{stt::models::realtime_v4};
+    std::string model{stt::models::realtime_v5};
     std::string audio_format{stt::audio_formats::auto_detect};
     int sample_rate{0};     ///< required when audio_format is pcm_s16le/pcm_s16be
     int num_channels{0};    ///< required when audio_format is pcm_s16le/pcm_s16be
@@ -222,7 +218,9 @@ struct SttRealtimeConfig {
     bool enable_speaker_diarization{false};
     bool enable_language_identification{false};
     bool enable_endpoint_detection{false};
-    int  max_endpoint_delay_ms{0}; ///< 500–3000 ms; 0 = server default of 2000
+    int    max_endpoint_delay_ms{0};             ///< 500–3000 ms; 0 = server default of 2000
+    double endpoint_sensitivity{0.0};            ///< -1.0–1.0; 0.0 = server default
+    int    endpoint_latency_adjustment_level{0}; ///< 0–3; 0 = server default
 
     std::string context_json;
     std::string translation_json;

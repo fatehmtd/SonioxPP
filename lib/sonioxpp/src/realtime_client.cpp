@@ -37,14 +37,20 @@ json buildTranslationJson(const Translation& translation)
     if (!translation.type.empty()) {
         t["type"] = translation.type;
     }
-    if (!translation.language_a.empty()) {
-        // one_way: API expects "target_language"; two_way: API expects "language_a"
-        const char* key = (translation.type == stt::translation_types::one_way)
-                          ? "target_language" : "language_a";
-        t[key] = translation.language_a;
-    }
-    if (!translation.language_b.empty()) {
-        t["language_b"] = translation.language_b;
+    if (translation.type == stt::translation_types::one_way) {
+        // language_a kept as a legacy fallback for the one_way target
+        const std::string& target = !translation.target_language.empty()
+                                    ? translation.target_language : translation.language_a;
+        if (!target.empty()) {
+            t["target_language"] = target;
+        }
+    } else {
+        if (!translation.language_a.empty()) {
+            t["language_a"] = translation.language_a;
+        }
+        if (!translation.language_b.empty()) {
+            t["language_b"] = translation.language_b;
+        }
     }
     return t;
 }
@@ -81,9 +87,14 @@ public:
         request.sample_rate = config.sample_rate;
         request.num_channels = config.num_channels;
         request.language_hints = config.language_hints;
+        request.language_hints_strict = config.language_hints_strict;
         request.enable_language_identification = config.enable_language_identification;
         request.enable_speaker_diarization = config.enable_speaker_diarization;
         request.enable_endpoint_detection = config.enable_endpoint_detection;
+        request.max_endpoint_delay_ms = config.max_endpoint_delay_ms;
+        request.endpoint_sensitivity = config.endpoint_sensitivity;
+        request.endpoint_latency_adjustment_level = config.endpoint_latency_adjustment_level;
+        request.client_reference_id = config.client_reference_id;
 
         const json context = buildContextJson(config.context);
         if (!context.empty()) {
@@ -156,10 +167,25 @@ private:
                 Token token;
                 token.text = item.value("text", std::string());
                 token.is_final = item.value("is_final", false);
-                token.speaker = item.value("speaker", 0);
+                // API sends speaker as a string label (e.g. "1")
+                const auto speakerIt = item.find("speaker");
+                if (speakerIt != item.end()) {
+                    if (speakerIt->is_number_integer()) {
+                        token.speaker = speakerIt->get<int>();
+                    } else if (speakerIt->is_string()) {
+                        try { token.speaker = std::stoi(speakerIt->get<std::string>()); } catch (...) {}
+                    }
+                }
+                token.start_ms = item.value("start_ms", 0);
+                token.end_ms = item.value("end_ms", 0);
+                token.duration_ms = (token.end_ms >= token.start_ms) ? (token.end_ms - token.start_ms) : 0;
+                token.confidence = item.value("confidence", 0.0);
                 const auto langIt = item.find("language");
                 if (langIt != item.end() && !langIt->is_null())
                     token.language = langIt->get<std::string>();
+                const auto srcLangIt = item.find("source_language");
+                if (srcLangIt != item.end() && !srcLangIt->is_null())
+                    token.source_language = srcLangIt->get<std::string>();
                 const auto tsIt = item.find("translation_status");
                 if (tsIt != item.end() && !tsIt->is_null())
                     token.translation_status = tsIt->get<std::string>();

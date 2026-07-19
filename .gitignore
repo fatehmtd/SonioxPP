@@ -17,3 +17,7 @@ build/
 
 # test output
 data/
+
+
+# misc
+.DS_Store

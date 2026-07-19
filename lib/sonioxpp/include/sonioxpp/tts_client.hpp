@@ -1,6 +1,7 @@
 #pragma once
 
 #include <sonioxpp/api_constants.hpp>
+#include <sonioxpp/types.hpp>
 #include <sonioxpp/transport/http_transport.hpp>
 #include <sonioxpp/transport/websocket_transport.hpp>
 
@@ -37,16 +38,57 @@ struct TtsModelsResponse {
 };
 
 // ---------------------------------------------------------------------------
+// Voices  (POST/GET/DELETE /v1/voices)
+// ---------------------------------------------------------------------------
+
+/// Preparation status of a cloned voice on one model.
+struct TtsVoiceModelStatus {
+    std::string model;
+    std::string status;        ///< e.g. "not_computed" when the model was released after the voice
+    std::string error_type;
+    std::string error_message;
+};
+
+/// A cloned voice created from a reference audio clip.
+struct TtsVoice {
+    std::string id;
+    std::string name;
+    std::string filename;
+    std::string created_at;
+    std::vector<TtsVoiceModelStatus> models;
+};
+
+struct TtsVoicesCount {
+    int total{0};
+};
+
+struct TtsListVoicesTypedResult {
+    std::vector<TtsVoice> voices;
+    std::string next_page_cursor;
+};
+
+// ---------------------------------------------------------------------------
 // Real-time TTS message
 // ---------------------------------------------------------------------------
+
+/// Character-level audio alignment (present when return_timestamps is enabled).
+struct TtsCharacterTimestamps {
+    std::vector<std::string> characters;
+    std::vector<double>      start_times_seconds;
+    std::vector<double>      end_times_seconds;
+};
 
 /// A server-sent message on the TTS real-time WebSocket.
 struct TtsRealtimeMessage {
     std::string stream_id;
     std::string audio;         ///< base64-encoded; empty for non-audio messages
+    bool        audio_end{false};  ///< last audio chunk for the stream
     bool        terminated{false}; ///< stream_id may be reused after this
+    TtsCharacterTimestamps timestamps;
     int         error_code{0};
+    std::string error_type;
     std::string error_message;
+    std::string request_id;
     std::string raw_message;
 };
 
@@ -58,11 +100,13 @@ struct TtsRealtimeMessage {
 struct TtsGenerateRequest {
     std::string model{tts::models::realtime_v1};
     std::string language;
-    std::string voice;
+    std::string voice;          ///< built-in voice name or cloned voice ID
     std::string audio_format;
-    std::string text;
+    std::string text;           ///< max 5000 characters
     int         sample_rate{0}; ///< 0 = format default (24 000 Hz)
     int         bitrate{0};     ///< 0 = format default; lossy formats only
+    double      speed{0.0};     ///< 0.7–1.3; 0.0 = server default of 1.0
+    std::string client_reference_id;
     std::string request_id;
 };
 
@@ -87,7 +131,32 @@ public:
     std::string       getModels();
     TtsModelsResponse getModelsTyped();
 
+    // Voice cloning  — POST/GET/DELETE /v1/voices
+
+    /// Uploads a reference audio clip; name must be unique (max 128 chars).
+    std::string createVoice(const std::string& name, const std::string& file_path);
+    TtsVoice    createVoiceTyped(const std::string& name, const std::string& file_path);
+
+    std::string              listVoices(const PaginationQuery& query = {});
+    TtsListVoicesTypedResult listVoicesTyped(const PaginationQuery& query = {});
+
+    std::string    getVoicesCount();
+    TtsVoicesCount getVoicesCountTyped();
+
+    std::string getVoice(const std::string& voice_id);
+    TtsVoice    getVoiceTyped(const std::string& voice_id);
+
+    /// Prepares a voice for models released after it was created.
+    std::string recomputeVoice(const std::string& voice_id);
+    TtsVoice    recomputeVoiceTyped(const std::string& voice_id);
+
+    void deleteVoice(const std::string& voice_id);
+
 private:
+    transport::HttpRequest makeApiRequest(
+        transport::HttpMethod method,
+        const std::string& path) const;
+
     std::string _apiKey;
     std::string _apiBaseUrl;
     std::string _ttsBaseUrl;
@@ -105,10 +174,13 @@ struct TtsRealtimeStreamConfig {
     std::string stream_id;        ///< reusable after terminated message
     std::string model{tts::models::realtime_v1};
     std::string language;
-    std::string voice;
+    std::string voice;            ///< built-in voice name or cloned voice ID
     std::string audio_format;
     int         sample_rate{0};   ///< 0 = format default
     int         bitrate{0};       ///< 0 = format default; lossy formats only
+    double      speed{0.0};       ///< 0.7–1.3; 0.0 = server default of 1.0
+    bool        return_timestamps{false}; ///< enable character-level audio alignment
+    std::string client_reference_id;
 };
 
 /* Event-driven WebSocket client for Soniox real-time TTS.
