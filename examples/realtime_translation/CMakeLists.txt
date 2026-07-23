@@ -9,4 +9,5 @@ target_link_libraries(soniox_realtime_translation
     PRIVATE
     sonioxpp
     spdlog::spdlog
+    nlohmann_json::nlohmann_json
     CLI11::CLI11)

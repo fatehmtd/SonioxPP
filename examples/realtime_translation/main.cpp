@@ -18,8 +18,11 @@
 #include <sonioxpp/soniox.hpp>
 #include <spdlog/spdlog.h>
 
+#include <nlohmann/json.hpp>
+
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -27,6 +30,63 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+namespace {
+
+/// Result of parsing one raw JSON text frame from the realtime STT WebSocket.
+struct ParsedMessage {
+    std::vector<soniox::Token> tokens;
+    bool has_final{false};
+    bool finished{false};
+    std::string error_message;
+    int error_code{0};
+};
+
+ParsedMessage parseRealtimeMessage(const std::string& raw)
+{
+    ParsedMessage result;
+
+    nlohmann::json payload;
+    try {
+        payload = nlohmann::json::parse(raw);
+    }
+    catch (const nlohmann::json::exception&) {
+        return result;
+    }
+
+    result.error_message = payload.value("error_message", std::string());
+    if (!result.error_message.empty()) {
+        result.error_code = payload.value("error_code", 0);
+        return result;
+    }
+
+    if (payload.contains("tokens") && payload["tokens"].is_array()) {
+        for (const auto& item : payload["tokens"]) {
+            soniox::Token token;
+            token.text = item.value("text", std::string());
+            token.is_final = item.value("is_final", false);
+            token.start_ms = item.value("start_ms", 0);
+            token.end_ms = item.value("end_ms", 0);
+            token.duration_ms = (token.end_ms >= token.start_ms) ? (token.end_ms - token.start_ms) : 0;
+            token.confidence = item.value("confidence", 0.0);
+
+            const auto tsIt = item.find("translation_status");
+            if (tsIt != item.end() && !tsIt->is_null()) {
+                token.translation_status = tsIt->get<std::string>();
+            }
+
+            if (token.is_final) {
+                result.has_final = true;
+            }
+            result.tokens.push_back(std::move(token));
+        }
+    }
+
+    result.finished = payload.value("finished", false);
+    return result;
+}
+
+} // namespace
 
 int main(int argc, char* argv[])
 {
@@ -54,60 +114,84 @@ int main(int argc, char* argv[])
 
     if (debug) spdlog::set_level(spdlog::level::debug);
 
-    soniox::RealtimeConfig config;
+    soniox::SttRealtimeConfig config;
     config.api_key                  = api_key_env;
     config.model                    = soniox::stt::models::realtime_v5;
     config.audio_format             = audio_fmt;
     config.language_hints           = {src_lang};
     config.enable_endpoint_detection = true;
-    config.translation.type            = soniox::stt::translation_types::one_way;
-    config.translation.target_language = tgt_lang;
+    config.translation_json = nlohmann::json{
+        {"type", soniox::stt::translation_types::one_way},
+        {"target_language", tgt_lang},
+    }.dump();
 
     std::string orig_line;
     std::string tran_line;
     std::mutex  print_mtx;
 
-    soniox::RealtimeClient client;
+    std::atomic<bool>      done{false};
+    std::mutex             done_mtx;
+    std::condition_variable done_cv;
 
-    client.setOnTokens([&](const std::vector<soniox::Token>& tokens, bool has_final) {
-        std::lock_guard<std::mutex> lk(print_mtx);
+    soniox::SttRealtimeClient client;
 
-        if (has_final) {
-            for (auto& tok : tokens) {
-                if (!tok.is_final) continue;
-                if (tok.translation_status == "translated")
-                    tran_line += tok.text;
-                else
-                    orig_line += tok.text;
+    client.setOnMessage([&](const std::string& raw) {
+        auto parsed = parseRealtimeMessage(raw);
+
+        if (!parsed.error_message.empty()) {
+            {
+                std::lock_guard<std::mutex> lk(print_mtx);
+                std::cerr << "\n[Error " << parsed.error_code << "] " << parsed.error_message << "\n";
             }
+            done.store(true);
+            done_cv.notify_all();
+            return;
         }
 
-        std::string orig_preview = orig_line;
-        std::string tran_preview = tran_line;
-        if (!has_final) {
-            for (auto& tok : tokens) {
-                if (tok.translation_status == "translated")
-                    tran_preview += tok.text;
-                else
-                    orig_preview += tok.text;
+        if (!parsed.tokens.empty()) {
+            std::lock_guard<std::mutex> lk(print_mtx);
+
+            if (parsed.has_final) {
+                for (auto& tok : parsed.tokens) {
+                    if (!tok.is_final) continue;
+                    if (tok.translation_status == "translated")
+                        tran_line += tok.text;
+                    else
+                        orig_line += tok.text;
+                }
             }
+
+            std::string orig_preview = orig_line;
+            std::string tran_preview = tran_line;
+            if (!parsed.has_final) {
+                for (auto& tok : parsed.tokens) {
+                    if (tok.translation_status == "translated")
+                        tran_preview += tok.text;
+                    else
+                        orig_preview += tok.text;
+                }
+            }
+
+            std::cout << "\033[2A"
+                      << "\r\033[K[orig] " << orig_preview << "\n"
+                      << "\r\033[K[tran] " << tran_preview << "\n"
+                      << std::flush;
         }
 
-        std::cout << "\033[2A"
-                  << "\r\033[K[orig] " << orig_preview << "\n"
-                  << "\r\033[K[tran] " << tran_preview << "\n"
-                  << std::flush;
+        if (parsed.finished) {
+            {
+                std::lock_guard<std::mutex> lk(print_mtx);
+                std::cout << "\n=== Original ===\n"    << orig_line
+                          << "\n=== Translation ===\n" << tran_line << "\n";
+            }
+            done.store(true);
+            done_cv.notify_all();
+        }
     });
 
-    client.setOnFinished([&] {
-        std::lock_guard<std::mutex> lk(print_mtx);
-        std::cout << "\n=== Original ===\n"    << orig_line
-                  << "\n=== Translation ===\n" << tran_line << "\n";
-    });
-
-    client.setOnError([&](const soniox::RealtimeError& err) {
-        std::lock_guard<std::mutex> lk(print_mtx);
-        std::cerr << "\n[Error " << err.error_code << "] " << err.error_message << "\n";
+    client.setOnClosed([&] {
+        done.store(true);
+        done_cv.notify_all();
     });
 
     try {
@@ -133,17 +217,16 @@ int main(int argc, char* argv[])
         }
         std::vector<uint8_t> buf(CHUNK_BYTES);
         while (f.read(reinterpret_cast<char*>(buf.data()), CHUNK_BYTES) || f.gcount() > 0) {
-            client.sendAudio(buf.data(), static_cast<size_t>(f.gcount()));
+            std::vector<uint8_t> chunk(buf.begin(), buf.begin() + f.gcount());
+            client.sendAudio(chunk);
             std::this_thread::sleep_for(std::chrono::milliseconds(chunk_ms));
         }
         client.sendEndOfAudio();
     });
 
-    try {
-        client.run();
-    }
-    catch (const std::exception& e) {
-        std::cerr << "\nReceive error: " << e.what() << "\n";
+    {
+        std::unique_lock<std::mutex> lock(done_mtx);
+        done_cv.wait(lock, [&] { return done.load(); });
     }
 
     sender.join();

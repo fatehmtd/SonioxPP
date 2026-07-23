@@ -15,7 +15,6 @@ else()
 endif()
 
 add_library(sonioxpp STATIC
-    src/realtime_client.cpp
     src/async_client.cpp
     src/stt_client.cpp
     src/tts_client.cpp

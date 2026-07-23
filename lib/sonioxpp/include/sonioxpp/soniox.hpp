@@ -2,7 +2,6 @@
 
 #include "types.hpp"
 #include "api_constants.hpp"
-#include "realtime_client.hpp"
 #include "async_client.hpp"
 #include "stt_client.hpp"
 #include "tts_client.hpp"

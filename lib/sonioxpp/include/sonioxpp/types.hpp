@@ -3,7 +3,6 @@
 #include <sonioxpp/api_constants.hpp>
 
 #include <cstdint>
-#include <functional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -55,30 +54,6 @@ struct PaginationQuery {
 };
 
 // ---------------------------------------------------------------------------
-// Realtime config
-// ---------------------------------------------------------------------------
-
-/// Configuration sent at the start of a real-time WebSocket session.
-struct RealtimeConfig {
-    std::string api_key;
-    std::string model{stt::models::realtime_v5};
-    std::string audio_format{stt::audio_formats::auto_detect};
-    int         sample_rate{0};    ///< required when audio_format is pcm_s16le/pcm_s16be
-    int         num_channels{0};   ///< required when audio_format is pcm_s16le/pcm_s16be
-    std::vector<std::string> language_hints;
-    bool language_hints_strict{false};
-    bool enable_language_identification{false};
-    bool enable_speaker_diarization{false};
-    bool enable_endpoint_detection{false};
-    int    max_endpoint_delay_ms{0};             ///< 500–3000 ms; 0 = server default of 2000
-    double endpoint_sensitivity{0.0};            ///< -1.0–1.0; 0.0 = server default
-    int    endpoint_latency_adjustment_level{0}; ///< 0–3; 0 = server default
-    Context     context;
-    Translation translation;
-    std::string client_reference_id; ///< custom session identifier, max 256 chars
-};
-
-// ---------------------------------------------------------------------------
 // Async config & result
 // ---------------------------------------------------------------------------
 
@@ -113,20 +88,6 @@ struct AsyncTranscription {
     TranscriptionStatus  status{TranscriptionStatus::Pending};
     std::string          error_message;
 };
-
-// ---------------------------------------------------------------------------
-// Callback signatures
-// ---------------------------------------------------------------------------
-
-using OnTokensCallback  = std::function<void(const std::vector<Token>&, bool /*has_final*/)>;
-using OnFinishedCallback = std::function<void()>;
-
-struct RealtimeError {
-    int         error_code{0};
-    std::string error_message;
-};
-
-using OnErrorCallback = std::function<void(const RealtimeError&)>;
 
 struct ApiValidationError {
     std::string error_type;

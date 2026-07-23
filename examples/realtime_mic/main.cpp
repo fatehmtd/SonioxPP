@@ -22,6 +22,8 @@
 #include <sonioxpp/soniox.hpp>
 #include <spdlog/spdlog.h>
 
+#include <nlohmann/json.hpp>
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -74,6 +76,63 @@ static void captureCallback(ma_device* device, void* /*output*/,
 }
 
 // ---------------------------------------------------------------------------
+// Realtime message parsing
+// ---------------------------------------------------------------------------
+
+/// Result of parsing one raw JSON text frame from the realtime STT WebSocket.
+struct ParsedMessage {
+    std::vector<soniox::Token> tokens;
+    bool has_final{false};
+    bool finished{false};
+    std::string error_message;
+    int error_code{0};
+};
+
+static ParsedMessage parseRealtimeMessage(const std::string& raw)
+{
+    ParsedMessage result;
+
+    nlohmann::json payload;
+    try {
+        payload = nlohmann::json::parse(raw);
+    }
+    catch (const nlohmann::json::exception&) {
+        return result;
+    }
+
+    result.error_message = payload.value("error_message", std::string());
+    if (!result.error_message.empty()) {
+        result.error_code = payload.value("error_code", 0);
+        return result;
+    }
+
+    if (payload.contains("tokens") && payload["tokens"].is_array()) {
+        for (const auto& item : payload["tokens"]) {
+            soniox::Token token;
+            token.text = item.value("text", std::string());
+            token.is_final = item.value("is_final", false);
+            token.start_ms = item.value("start_ms", 0);
+            token.end_ms = item.value("end_ms", 0);
+            token.duration_ms = (token.end_ms >= token.start_ms) ? (token.end_ms - token.start_ms) : 0;
+            token.confidence = item.value("confidence", 0.0);
+
+            const auto langIt = item.find("language");
+            if (langIt != item.end() && !langIt->is_null()) {
+                token.language = langIt->get<std::string>();
+            }
+
+            if (token.is_final) {
+                result.has_final = true;
+            }
+            result.tokens.push_back(std::move(token));
+        }
+    }
+
+    result.finished = payload.value("finished", false);
+    return result;
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -101,7 +160,7 @@ int main(int argc, char* argv[])
 
     if (debug) spdlog::set_level(spdlog::level::debug);
 
-    soniox::RealtimeConfig config;
+    soniox::SttRealtimeConfig config;
     config.api_key                        = api_key_env;
     config.model                          = soniox::stt::models::realtime_v5;
     config.audio_format                   = soniox::stt::audio_formats::pcm_s16le;
@@ -116,36 +175,56 @@ int main(int argc, char* argv[])
     std::mutex         print_mtx;
     std::atomic<bool>  session_error{false};
 
-    soniox::RealtimeClient client;
+    std::atomic<bool>      done{false};
+    std::mutex              done_mtx;
+    std::condition_variable done_cv;
 
-    client.setOnTokens([&](const std::vector<soniox::Token>& tokens, bool has_final) {
-        std::lock_guard<std::mutex> lk(print_mtx);
+    soniox::SttRealtimeClient client;
 
-        if (has_final)
-            for (const auto& tok : tokens)
-                if (tok.is_final) transcript += tok.text;
+    client.setOnMessage([&](const std::string& raw) {
+        auto parsed = parseRealtimeMessage(raw);
 
-        std::string preview = transcript;
-        if (!has_final)
-            for (const auto& tok : tokens) preview += tok.text;
-
-        std::cout << "\r\033[K"
-                  << (has_final ? "[F] " : "[~] ") << preview
-                  << std::flush;
-    });
-
-    client.setOnFinished([&] {
-        std::lock_guard<std::mutex> lk(print_mtx);
-        std::cout << "\n\n=== Session complete ===\n" << transcript << "\n";
-    });
-
-    client.setOnError([&](const soniox::RealtimeError& err) {
-        {
-            std::lock_guard<std::mutex> lk(print_mtx);
-            std::cerr << "\n[Error " << err.error_code << "] " << err.error_message << "\n";
+        if (!parsed.error_message.empty()) {
+            {
+                std::lock_guard<std::mutex> lk(print_mtx);
+                std::cerr << "\n[Error " << parsed.error_code << "] " << parsed.error_message << "\n";
+            }
+            session_error.store(true, std::memory_order_relaxed);
+            g_stop.store(true, std::memory_order_relaxed);
+            done.store(true);
+            done_cv.notify_all();
+            return;
         }
-        session_error.store(true, std::memory_order_relaxed);
-        g_stop.store(true, std::memory_order_relaxed);
+
+        if (!parsed.tokens.empty()) {
+            std::lock_guard<std::mutex> lk(print_mtx);
+
+            if (parsed.has_final)
+                for (const auto& tok : parsed.tokens)
+                    if (tok.is_final) transcript += tok.text;
+
+            std::string preview = transcript;
+            if (!parsed.has_final)
+                for (const auto& tok : parsed.tokens) preview += tok.text;
+
+            std::cout << "\r\033[K"
+                      << (parsed.has_final ? "[F] " : "[~] ") << preview
+                      << std::flush;
+        }
+
+        if (parsed.finished) {
+            {
+                std::lock_guard<std::mutex> lk(print_mtx);
+                std::cout << "\n\n=== Session complete ===\n" << transcript << "\n";
+            }
+            done.store(true);
+            done_cv.notify_all();
+        }
+    });
+
+    client.setOnClosed([&] {
+        done.store(true);
+        done_cv.notify_all();
     });
 
     try {
@@ -196,14 +275,6 @@ int main(int argc, char* argv[])
         }
     });
 
-    std::thread receiver([&] {
-        try {
-            client.run();
-        } catch (const std::exception& e) {
-            std::cerr << "\nReceive error: " << e.what() << "\n";
-        }
-    });
-
     if (ma_device_start(&device) != MA_SUCCESS) {
         std::cerr << "Failed to start audio capture device.\n";
         ma_device_uninit(&device);
@@ -237,7 +308,10 @@ int main(int argc, char* argv[])
     sender.join();
 
     std::cout << "Waiting for final transcript...\n";
-    receiver.join();
+    {
+        std::unique_lock<std::mutex> lock(done_mtx);
+        done_cv.wait(lock, [&] { return done.load(); });
+    }
 
     ma_device_uninit(&device);
     return 0;

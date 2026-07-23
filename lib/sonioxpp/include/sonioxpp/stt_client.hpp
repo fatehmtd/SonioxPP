@@ -230,8 +230,7 @@ struct SttRealtimeConfig {
     std::string client_reference_id;
 };
 
-/* Low-level WebSocket client for Soniox real-time STT — delivers raw JSON to a callback.
-   For a higher-level client with typed callbacks, use RealtimeClient instead. */
+/// WebSocket client for Soniox real-time STT — delivers raw JSON text frames to a callback.
 class SttRealtimeClient {
 public:
     /// Called for each JSON text frame received from the server.
