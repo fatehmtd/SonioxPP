@@ -158,14 +158,15 @@ TtsRestClient::TtsRestClient(
     std::string api_key,
     std::shared_ptr<transport::IHttpTransport> http_transport,
     std::string api_base_url,
-    std::string tts_base_url)
+    std::string tts_base_url,
+    std::string ca_file_path)
     : _apiKey(std::move(api_key)),
       _apiBaseUrl(std::move(api_base_url)),
       _ttsBaseUrl(std::move(tts_base_url)),
       _httpTransport(std::move(http_transport))
 {
     if (!_httpTransport) {
-        _httpTransport = std::make_shared<transport::CurlHttpTransport>();
+        _httpTransport = std::make_shared<transport::CurlHttpTransport>(std::move(ca_file_path));
     }
 }
 
@@ -328,7 +329,8 @@ void TtsRestClient::deleteVoice(const std::string& voice_id)
 
 TtsRealtimeClient::TtsRealtimeClient(
     std::shared_ptr<transport::IWebSocketTransport> ws_transport,
-    std::string endpoint)
+    std::string endpoint,
+    std::string ca_file_path)
     : _endpoint(std::move(endpoint)),
       _wsTransport(std::move(ws_transport))
 {
@@ -336,7 +338,7 @@ TtsRealtimeClient::TtsRealtimeClient(
 #ifdef _WIN32
         _wsTransport = std::make_shared<transport::WinHttpWebSocketTransport>();
 #else
-        _wsTransport = std::make_shared<transport::LwsWebSocketTransport>();
+        _wsTransport = std::make_shared<transport::LwsWebSocketTransport>(std::move(ca_file_path));
 #endif
     }
 

@@ -58,13 +58,14 @@ void throwIfError(const transport::HttpResponse& response, const std::string& op
 AuthClient::AuthClient(
     std::string api_key,
     std::shared_ptr<transport::IHttpTransport> http_transport,
-    std::string base_url)
+    std::string base_url,
+    std::string ca_file_path)
     : _apiKey(std::move(api_key)),
       _baseUrl(std::move(base_url)),
       _httpTransport(std::move(http_transport))
 {
     if (!_httpTransport) {
-        _httpTransport = std::make_shared<transport::CurlHttpTransport>();
+        _httpTransport = std::make_shared<transport::CurlHttpTransport>(std::move(ca_file_path));
     }
 }
 

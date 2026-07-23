@@ -139,10 +139,12 @@ struct SttCreateTranscriptionRequest {
    All methods throw SonioxApiException on HTTP >= 400. */
 class SttRestClient {
 public:
+    /// ca_file_path is ignored when http_transport is supplied explicitly.
     explicit SttRestClient(
         std::string api_key,
         std::shared_ptr<transport::IHttpTransport> http_transport = nullptr,
-        std::string base_url = "https://api.soniox.com");
+        std::string base_url = "https://api.soniox.com",
+        std::string ca_file_path = {});
 
     // File management  — POST/GET/DELETE /v1/files
 
@@ -241,9 +243,11 @@ public:
     /// Called once the WebSocket connection is fully closed.
     using ClosedCallback = std::function<void()>;
 
+    /// ca_file_path is ignored when ws_transport is supplied explicitly.
     explicit SttRealtimeClient(
         std::shared_ptr<transport::IWebSocketTransport> ws_transport = nullptr,
-        std::string endpoint = "wss://stt-rt.soniox.com/transcribe-websocket");
+        std::string endpoint = "wss://stt-rt.soniox.com/transcribe-websocket",
+        std::string ca_file_path = {});
 
     void setOnMessage(MessageCallback callback);
     void setOnError(ErrorCallback callback);

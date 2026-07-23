@@ -164,13 +164,14 @@ void throwIfError(const transport::HttpResponse& response, const std::string& op
 SttRestClient::SttRestClient(
     std::string api_key,
     std::shared_ptr<transport::IHttpTransport> http_transport,
-    std::string base_url)
+    std::string base_url,
+    std::string ca_file_path)
     : _apiKey(std::move(api_key)),
       _baseUrl(std::move(base_url)),
       _httpTransport(std::move(http_transport))
 {
     if (!_httpTransport) {
-        _httpTransport = std::make_shared<transport::CurlHttpTransport>();
+        _httpTransport = std::make_shared<transport::CurlHttpTransport>(std::move(ca_file_path));
     }
 }
 
@@ -421,7 +422,8 @@ std::string SttRestClient::getModels()
 
 SttRealtimeClient::SttRealtimeClient(
     std::shared_ptr<transport::IWebSocketTransport> ws_transport,
-    std::string endpoint)
+    std::string endpoint,
+    std::string ca_file_path)
     : _endpoint(std::move(endpoint)),
       _wsTransport(std::move(ws_transport))
 {
@@ -429,7 +431,7 @@ SttRealtimeClient::SttRealtimeClient(
 #ifdef _WIN32
         _wsTransport = std::make_shared<transport::WinHttpWebSocketTransport>();
 #else
-        _wsTransport = std::make_shared<transport::LwsWebSocketTransport>();
+        _wsTransport = std::make_shared<transport::LwsWebSocketTransport>(std::move(ca_file_path));
 #endif
     }
 

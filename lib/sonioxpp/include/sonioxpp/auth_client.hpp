@@ -24,10 +24,12 @@ struct TemporaryApiKeyRequest {
 /// Mints short-lived API keys for client-side use via POST /v1/auth/temporary-api-key.
 class AuthClient {
 public:
+    /// ca_file_path is ignored when http_transport is supplied explicitly.
     explicit AuthClient(
         std::string api_key,
         std::shared_ptr<transport::IHttpTransport> http_transport = nullptr,
-        std::string base_url = "https://api.soniox.com");
+        std::string base_url = "https://api.soniox.com",
+        std::string ca_file_path = {});
 
     /// @throws SonioxApiException on HTTP >= 400.
     std::string createTemporaryApiKey(const TemporaryApiKeyRequest& request);

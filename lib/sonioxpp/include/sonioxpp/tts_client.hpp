@@ -117,11 +117,13 @@ struct TtsGenerateRequest {
 /// REST client for Soniox Text-to-Speech.
 class TtsRestClient {
 public:
+    /// ca_file_path is ignored when http_transport is supplied explicitly.
     explicit TtsRestClient(
         std::string api_key,
         std::shared_ptr<transport::IHttpTransport> http_transport = nullptr,
         std::string api_base_url = "https://api.soniox.com",
-        std::string tts_base_url = "https://tts-rt.soniox.com");
+        std::string tts_base_url = "https://tts-rt.soniox.com",
+        std::string ca_file_path = {});
 
     /* Returns HttpResponse whose body contains raw audio bytes.
        Check trailers["X-Tts-Error-Code"] for mid-stream errors.
@@ -200,9 +202,11 @@ public:
     /// Called once the WebSocket connection is fully closed.
     using ClosedCallback = std::function<void()>;
 
+    /// ca_file_path is ignored when ws_transport is supplied explicitly.
     explicit TtsRealtimeClient(
         std::shared_ptr<transport::IWebSocketTransport> ws_transport = nullptr,
-        std::string endpoint = "wss://tts-rt.soniox.com/tts-websocket");
+        std::string endpoint = "wss://tts-rt.soniox.com/tts-websocket",
+        std::string ca_file_path = {});
 
     void setOnMessage(TextMessageCallback callback);
     void setOnParsedMessage(ParsedMessageCallback callback);

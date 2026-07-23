@@ -11,7 +11,11 @@ struct LwsWebSocketTransportImpl;
 /// libwebsockets-backed WebSocket transport (Linux / macOS).
 class LwsWebSocketTransport final : public IWebSocketTransport {
 public:
-    LwsWebSocketTransport();
+    /* caFilePath: CA bundle (PEM) consulted for the TLS handshake. mbedTLS (our TLS
+       backend everywhere except Windows) ships with no built-in trust anchors, so on
+       platforms where the OS trust store isn't visible to it (e.g. Android) this must
+       be set explicitly; leave empty to use the platform default. */
+    explicit LwsWebSocketTransport(std::string caFilePath = {});
     ~LwsWebSocketTransport() override;
 
     void setOnOpen(OpenHandler handler) override;

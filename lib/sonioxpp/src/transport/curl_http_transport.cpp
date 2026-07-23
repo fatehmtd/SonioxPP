@@ -102,6 +102,11 @@ curl_mime* buildMime(CURL* curl, const HttpRequest& request)
 
 } // namespace
 
+CurlHttpTransport::CurlHttpTransport(std::string caFilePath)
+    : _caFilePath(std::move(caFilePath))
+{
+}
+
 HttpResponse CurlHttpTransport::send(const HttpRequest& request)
 {
     static const int curlGlobalInitResult = [] {
@@ -124,6 +129,10 @@ HttpResponse CurlHttpTransport::send(const HttpRequest& request)
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
     curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, writeHeaderCallback);
     curl_easy_setopt(curl, CURLOPT_HEADERDATA, &ctx);
+
+    if (!_caFilePath.empty()) {
+        curl_easy_setopt(curl, CURLOPT_CAINFO, _caFilePath.c_str());
+    }
 
     if (request.timeout_ms > 0) {
         curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, request.timeout_ms);
